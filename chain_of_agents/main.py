@@ -1,11 +1,13 @@
 from typing import Optional, Iterator, Dict
-from .agents import WorkerAgent, ManagerAgent
-from .utils import split_into_chunks, get_default_prompts
+from agents import WorkerAgent, ManagerAgent
+from utils import split_into_chunks, get_default_prompts, get_majority_vote_prompt, extract_answer
 import logging
 import json
+import random
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class ChainOfAgents:
     """Main class for the Chain of Agents implementation."""
@@ -115,3 +117,86 @@ class ChainOfAgents:
             "type": "manager",
             "content": final_output
         } 
+
+class MajorityVotingAgents:
+    """Class for implementing majority voting among multiple agent instances."""
+    
+    def __init__(
+        self,
+        model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",  # Together AI model
+        num_agents: int = 3,
+        max_tokens: int = 512,
+        prompt: Optional[str] = None,
+    ):
+        """
+        Initialize the Majority Voting Agents.
+        
+        Args:
+            model: Model to use for all agents
+            num_agents: Number of agents to create for voting
+            prompt: Custom system prompt for agents
+        """
+        default_prompt =  get_majority_vote_prompt()
+        self.prompt = prompt or default_prompt
+        self.model = model
+        self.num_agents = num_agents
+        self.max_tokens = max_tokens 
+        
+        logger.info(f"Initialized Majority Voting with {self.num_agents} agents using model {self.model}")
+    
+    def process(self, input_text: str, query: str) -> str:
+        """
+        Process input using multiple agents and perform majority voting.
+        
+        Args:
+            input_text: The input text to process
+            query: The user's query about the text
+            
+        Returns:
+            str: The most common response from the agents
+        """
+        # Create multiple agent instances and collect their outputs
+        agent_answers = []
+        
+        for agent_num in range(self.num_agents):
+            logger.info(f"Running agent {agent_num+1}/{self.num_agents}")
+            
+            # Create worker agent and process the complete input
+            worker = WorkerAgent(self.model, self.prompt, max_tokens=self.max_tokens)
+            result = worker.process_chunk(input_text, query, None)
+            print("Agent output:", result)  # Debug log
+            answer = extract_answer(result)
+            if answer:
+                agent_answers.append(answer)
+            else:
+                logger.warning(f"Agent {agent_num+1} returned no valid answer")
+            
+        # Perform majority voting on results
+        answers = {}
+        for output in agent_answers:
+            if output in answers:
+                answers[output] += 1
+            else:
+                answers[output] = 1
+        
+        # Find the most common answer
+        most_common_answer = max(answers.items(), key=lambda x: x[1])[0]
+        
+        return most_common_answer
+
+
+if __name__ == "__main__":
+    # Example usage
+    maj_vote = MajorityVotingAgents(num_agents=5, max_tokens=2048)
+    input_text = ' '.join(random.choice(['0', '1']) for _ in range(30))
+    query = "What is the parity of the given binary string?"
+
+    result = maj_vote.process(input_text, query)
+    print(f"Majority Voting Result: {result}")
+    # This will print the most common response from the agents
+
+    # Ground truth result
+    parity = "even" if input_text.count('1') % 2 == 0 else "odd"
+    print(f"Ground truth parity: {parity}")
+    print(f"Number of 1s in input: {input_text.count('1')}")
+    

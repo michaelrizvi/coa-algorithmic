@@ -5,7 +5,7 @@ import os
 class WorkerAgent:
     """Worker agent that processes individual chunks of text."""
     
-    def __init__(self, model: str, system_prompt: str):
+    def __init__(self, model: str, system_prompt: str, max_tokens: int = 512):
         """
         Initialize a worker agent.
         
@@ -16,6 +16,7 @@ class WorkerAgent:
         self.model = model
         self.system_prompt = system_prompt
         self.client = Together()  # Uses TOGETHER_API_KEY from environment
+        self.max_tokens = max_tokens  # Adjust as needed for your model
     
     def process_chunk(self, chunk: str, query: str, previous_cu: Optional[str] = None) -> str:
         """
@@ -38,7 +39,7 @@ class WorkerAgent:
             model=self.model,
             messages=messages,
             temperature=0.3,
-            max_tokens=256
+            max_tokens=self.max_tokens
         )
         
         return response.choices[0].message.content
@@ -64,7 +65,7 @@ class WorkerAgent:
 class ManagerAgent:
     """Manager agent that synthesizes outputs from worker agents."""
     
-    def __init__(self, model: str, system_prompt: str):
+    def __init__(self, model: str, system_prompt: str, max_tokens: int = 1024):
         """
         Initialize a manager agent.
         
@@ -75,6 +76,7 @@ class ManagerAgent:
         self.model = model
         self.system_prompt = system_prompt
         self.client = Together()  # Uses TOGETHER_API_KEY from environment
+        self.max_new_tokens = max_tokens  # Adjust as needed for synthesis
     
     def synthesize(self, worker_outputs: List[str], query: str) -> str:
         """
@@ -99,7 +101,7 @@ class ManagerAgent:
             model=self.model,
             messages=messages,
             temperature=0.3,
-            max_new_tokens=512  # Adjust as needed for synthesis
+            max_new_tokens=self.max_new_tokens
         )
         
         return response.choices[0].message.content

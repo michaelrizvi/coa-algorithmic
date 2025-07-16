@@ -20,7 +20,12 @@ if not os.getenv("TOGETHER_API_KEY"):
 
 # Initialize Chain of Agents
 parity_worker_prompt = """You are a worker agent responsible for analyzing a portion of a document.
-Your task is to provide an analysis of the binary string provided in your chunk and determine if it is even or odd parity."""
+Your task is to provide an analysis of the binary string provided in your chunk and determine if it is even or odd parity. To compute the parity, follow these steps:
+1. Count the number of '1's in the binary string.
+2. If the count is even, return 'even'.
+3. If the count is odd, return 'odd'.
+4. Provide your result in a clear and concise manner.
+"""
 
 parity_manager_prompt = """You are a manager agent responsible for synthesizing information from multiple workers.
 Your task is to combine their provided parities and determine the overall parity of the binary string. To compute the aggregate parity, follow these steps:
@@ -41,7 +46,7 @@ coa = ChainOfAgents(
 )
 
 # input is a string of random bits to comput the parity on 
-input_text = ' '.join(random.choice(['0', '1']) for _ in range(200))
+input_text = ' '.join(random.choice(['0', '1']) for _ in range(300))
 # Compute the parity of the bitstring
 if len(input_text) % 2 == 0:
     parity = "even"

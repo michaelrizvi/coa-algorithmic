@@ -1,6 +1,7 @@
 from typing import List
 import logging
 import fitz  # PyMuPDF
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -101,3 +102,26 @@ Your task is to identify key information related to the user's query and provide
 Your task is to combine their analyses into a coherent, comprehensive response that directly answers the user's query."""
 
     return worker_prompt, manager_prompt 
+
+def get_majority_vote_prompt() -> str:
+    """
+    Get the system prompt for majority vote synthesis.
+    
+    Returns:
+        str: The majority vote synthesis prompt
+    """
+    return """You are a reasoning agent tasked with finding the best answer to a problem.
+
+    Given the user's query and the input text, you need to:
+    1. Carefully read and understand the problem being asked
+    2. Analyze the provided information systematically
+    3. Think through the solution step-by-step
+    4. Show your reasoning process clearly
+    5. Present the final answer in the format "The answer is: [your answer]"
+
+    Your response must be consice, logical, and directly address the query.
+    """
+
+def extract_answer(text):
+    match = re.search(r"The answer is:?\s*(.+?)(?:\\|\n|$)", text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
