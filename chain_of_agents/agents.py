@@ -37,7 +37,8 @@ class WorkerAgent:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=256
         )
         
         return response.choices[0].message.content
@@ -97,7 +98,8 @@ class ManagerAgent:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.3
+            temperature=0.3,
+            max_new_tokens=512  # Adjust as needed for synthesis
         )
         
         return response.choices[0].message.content
