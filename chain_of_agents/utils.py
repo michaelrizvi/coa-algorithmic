@@ -122,6 +122,55 @@ def get_majority_vote_prompt() -> str:
     Your response must be consice, logical, and directly address the query.
     """
 
+def get_prefix_sum_prompt() -> str:
+    """
+    Get the system prompt for prefix sum calculation.
+    
+    Returns:
+        tuple[str, str]: The prefix sum prompt
+    """
+    worker_prompt = """You are a worker agent responsible for calculating the parity of a single binary digit. if the digit is 1, you will return 1, otherwise you will return 0.
+    Present the final answer in the format "The answer is: [your answer]"
+    """
+    manager_prompt = """You are a manager agent responsible for synthesizing the results of 2 previous workers.
+    Your task is to return the parity of the binary string provided by the two worker agents.
+    To compute the parity, follow these steps:
+    1. Collect the results from the two worker agents.
+    2. If both results are 0, return 'even'.
+    3. If one result is 1 and the other is 0, return 'odd'.
+    4. If both results are 1, return 'even'.
+    5. Present the final answer in the format "The answer is: [your answer]"
+    """
+    return worker_prompt, manager_prompt
+
+def get_parity_prompt() -> str:
+    """
+    Get the system prompt for parity calculation.
+    
+    Returns:
+        str: The parity calculation prompt
+    """
+    parity_worker_prompt = """You are a worker agent responsible for analyzing a portion of a document.
+    Your task is to provide an analysis of the binary string provided in your chunk and determine if it is even or odd parity. To compute the parity, follow these steps:
+    1. Count the number of '1's in the binary string.
+    2. If the count is even, return '0'.
+    3. If the count is odd, return '1'.
+    4. Provide your result in a clear and concise manner.
+    5. Present the final answer in the format "The answer is: [your answer]"
+    """
+
+    parity_manager_prompt = """You are a manager agent responsible for synthesizing information from multiple workers.
+    Your task is to combine their provided parities and determine the overall parity of the binary string. To compute the aggregate parity, follow these steps:
+    1. Collect the parity results from all worker agents.
+    2. Each worker will return either '0' or '1'.
+    3. Count the number of '1' responses.
+    4. If the count of '1' responses is even, the overall parity is 'even'.
+    5. If the count of '1' responses is odd, the overall parity is 'odd'.
+    6. Return the final parity result.
+    """
+
+    return parity_worker_prompt, parity_manager_prompt
+
 def extract_answer(text):
     match = re.search(r"The answer is:?\s*(.+?)(?:\\|\n|$)", text, re.IGNORECASE)
     return match.group(1).strip() if match else None

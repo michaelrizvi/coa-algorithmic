@@ -173,3 +173,7 @@ cython_debug/
 # VS Code stuff
 .DS_Store
 .vscode/
+
+# wandb stuff
+.wandb/
+wandb/

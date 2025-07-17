@@ -5,7 +5,7 @@ import os
 class WorkerAgent:
     """Worker agent that processes individual chunks of text."""
     
-    def __init__(self, model: str, system_prompt: str, max_tokens: int = 512):
+    def __init__(self, model: str, system_prompt: str, max_tokens: int = 512, temperature: float = 0.5):
         """
         Initialize a worker agent.
         
@@ -17,6 +17,7 @@ class WorkerAgent:
         self.system_prompt = system_prompt
         self.client = Together()  # Uses TOGETHER_API_KEY from environment
         self.max_tokens = max_tokens  # Adjust as needed for your model
+        self.temperature = temperature  # Adjust for creativity vs. accuracy
     
     def process_chunk(self, chunk: str, query: str, previous_cu: Optional[str] = None) -> str:
         """
@@ -38,7 +39,7 @@ class WorkerAgent:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.3,
+            temperature=self.temperature,
             max_tokens=self.max_tokens
         )
         
@@ -65,7 +66,7 @@ class WorkerAgent:
 class ManagerAgent:
     """Manager agent that synthesizes outputs from worker agents."""
     
-    def __init__(self, model: str, system_prompt: str, max_tokens: int = 1024):
+    def __init__(self, model: str, system_prompt: str, max_tokens: int = 1024, temperature: float = 0.5):
         """
         Initialize a manager agent.
         
@@ -77,6 +78,7 @@ class ManagerAgent:
         self.system_prompt = system_prompt
         self.client = Together()  # Uses TOGETHER_API_KEY from environment
         self.max_new_tokens = max_tokens  # Adjust as needed for synthesis
+        self.temperature = temperature  # Adjust for creativity vs. accuracy
     
     def synthesize(self, worker_outputs: List[str], query: str) -> str:
         """
@@ -96,11 +98,12 @@ class ManagerAgent:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Worker Outputs:\n{combined_outputs}\n\nQuery: {query}"}
         ]
-        
+
+        print("Synthesizing with messages:", messages)  # Debug log 
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.3,
+            temperature=self.temperature,
             max_new_tokens=self.max_new_tokens
         )
         

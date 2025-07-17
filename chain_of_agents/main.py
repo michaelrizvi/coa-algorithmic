@@ -1,6 +1,6 @@
 from typing import Optional, Iterator, Dict
 from agents import WorkerAgent, ManagerAgent
-from utils import split_into_chunks, get_default_prompts, get_majority_vote_prompt, extract_answer
+from utils import split_into_chunks, get_default_prompts, get_majority_vote_prompt, extract_answer, get_prefix_sum_prompt, get_parity_prompt
 import logging
 import json
 import random
@@ -17,6 +17,8 @@ class ChainOfAgents:
         worker_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",  # Together AI model
         manager_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",  # Together AI model
         chunk_size: int = 500,
+        max_tokens_worker: int = 512,
+        max_tokens_manager: int = 1024,
         worker_prompt: Optional[str] = None,
         manager_prompt: Optional[str] = None
     ):
@@ -37,10 +39,12 @@ class ChainOfAgents:
         self.chunk_size = chunk_size
         self.worker_model = worker_model
         self.manager_model = manager_model
+        self.max_tokens_worker = max_tokens_worker
+        self.max_tokens_manager = max_tokens_manager
         
         logger.info(f"Initialized Chain of Agents with {worker_model} workers and {manager_model} manager")
     
-    def process(self, input_text: str, query: str) -> str:
+    def process(self, input_text: str, query: str, extraction_func = None ) -> str:
         """
         Process a long text input using the Chain of Agents.
         
@@ -60,13 +64,16 @@ class ChainOfAgents:
         
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
-            worker = WorkerAgent(self.worker_model, self.worker_prompt)
+            worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
             output = worker.process_chunk(chunk, query, previous_cu)
+            print("Agent output:", output)  # Debug log
+            if extraction_func:
+                output = extraction_func(output)
             worker_outputs.append(output)
             previous_cu = output
         
         # Synthesize results with manager agent
-        manager = ManagerAgent(self.manager_model, self.manager_prompt)
+        manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
         final_output = manager.synthesize(worker_outputs, query)
         
         return final_output 
@@ -118,6 +125,7 @@ class ChainOfAgents:
             "content": final_output
         } 
 
+
 class MajorityVotingAgents:
     """Class for implementing majority voting among multiple agent instances."""
     
@@ -164,7 +172,7 @@ class MajorityVotingAgents:
             # Create worker agent and process the complete input
             worker = WorkerAgent(self.model, self.prompt, max_tokens=self.max_tokens)
             result = worker.process_chunk(input_text, query, None)
-            print("Agent output:", result)  # Debug log
+            #print("Agent output:", result)  # Debug log
             answer = extract_answer(result)
             if answer:
                 agent_answers.append(answer)
@@ -185,10 +193,89 @@ class MajorityVotingAgents:
         return most_common_answer
 
 
+class PrefixSumAgents:
+    """Class for implementing prefix sum calculation using multiple agents."""
+    
+    def __init__(
+            self,
+            worker_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+            manager_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+            max_tokens_worker: int = 512,
+            max_tokens_manager: int = 1024,
+            worker_prompt: Optional[str] = None,
+            manager_prompt: Optional[str] = None 
+            ):
+        """
+        Initialize the Prefix Sum Agents.
+        
+        Args:
+            model: Model to use for all agents
+            num_agents: Number of agents to create for prefix sum calculation
+        """
+        default_worker_prompt, default_manager_prompt = get_prefix_sum_prompt()
+        self.worker_model = worker_model
+        self.manager_model = manager_model 
+        self.max_tokens_worker = max_tokens_worker
+        self.max_tokens_manager = max_tokens_manager
+        self.worker_prompt = worker_prompt or default_worker_prompt
+        self.manager_prompt = manager_prompt or default_manager_prompt
+
+        
+    def hierarchical_process(self, input_text: str, query: str, extraction_func=None) -> str:
+        """
+        Hierarchical processing of input using binary tree agent structure (like prefix sum).
+
+        Args:
+            input_text: Binary string of 0s and 1s
+            query: Query for each agent
+            extraction_func: Optional function to extract/transform output at each step
+
+        Returns:
+            str: Final synthesized output
+        """
+        logging.info(f"Starting hierarchical_process with input: {input_text} and query: '{query}'")
+
+        assert all(c in "0 1" for c in input_text), "Input must be a binary string"
+        assert (N := len(input_text.replace(" ", ""))) > 0 and (N & (N - 1)) == 0, "Length must be a power of 2"
+
+        level_outputs = []
+        worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
+        for i, token in enumerate(input_text.replace(" ", "")):
+            #print("Processing token:", token)  # Debug log
+            output = worker.process_chunk(token, query, None)
+            logging.info(f"Worker {i} output: {output}")
+            if extraction_func:
+                output = extraction_func(output)
+                logging.info(f"Worker {i} extracted output: {output}")
+            level_outputs.append(output)
+
+        round_num = 0
+        manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
+        while len(level_outputs) > 1:
+            logging.info(f"Manager round {round_num} with {len(level_outputs)} inputs")
+            next_level = []
+            for i in range(0, len(level_outputs), 2):
+                synthesized = manager.synthesize([level_outputs[i], level_outputs[i+1]], query)
+                logging.info(f"Manager input: [{level_outputs[i]}, {level_outputs[i+1]}] -> {synthesized}")
+                if extraction_func:
+                    synthesized = extraction_func(synthesized)
+                    logging.info(f"Extracted synthesized output: {synthesized}")
+                next_level.append(synthesized)
+            level_outputs = next_level
+            round_num += 1
+
+        logging.info(f"Final output: {level_outputs[0]}")
+        return level_outputs[0]
+
+
+
+
+
 if __name__ == "__main__":
     # Example usage
+    seq_len = 32 
+    input_text = ' '.join(random.choice(['0', '1']) for _ in range(seq_len))
     maj_vote = MajorityVotingAgents(num_agents=5, max_tokens=2048)
-    input_text = ' '.join(random.choice(['0', '1']) for _ in range(30))
     query = "What is the parity of the given binary string?"
 
     result = maj_vote.process(input_text, query)
@@ -200,3 +287,32 @@ if __name__ == "__main__":
     print(f"Ground truth parity: {parity}")
     print(f"Number of 1s in input: {input_text.count('1')}")
     
+    # Example for prefix sum agents
+    parity_worker_prompt, parity_manager_prompt = get_parity_prompt()
+    coa = ChainOfAgents(
+        worker_model="lgai/exaone-3-5-32b-instruct",
+        manager_model="lgai/exaone-3-5-32b-instruct",
+        chunk_size=10,  # Reduced chunk size for better handling
+        worker_prompt=parity_worker_prompt,
+        manager_prompt=parity_manager_prompt,
+        max_tokens_worker=1024
+    )
+
+    final_output = coa.process(input_text, query, extraction_func=extract_answer)
+ 
+    print(f"Final synthesized output: {final_output}")
+
+    # Example for hierarchical processing
+    prefix_sum_agents = PrefixSumAgents(
+        worker_model="lgai/exaone-3-5-32b-instruct",
+        manager_model="lgai/exaone-3-5-32b-instruct",
+        max_tokens_worker=64,
+        max_tokens_manager=64
+    )
+    final_output = prefix_sum_agents.hierarchical_process(input_text, query, extraction_func=extract_answer)
+    print(f"Hierarchical processing result: {final_output}")
+
+    # Ground truth result
+    parity = "even" if input_text.count('1') % 2 == 0 else "odd"
+    print(f"Ground truth parity: {parity}")
+    print(f"Number of 1s in input: {input_text.count('1')}")
