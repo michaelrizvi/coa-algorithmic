@@ -6,6 +6,14 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+INDEX_HINT_STRING ="""
+    You will receive a binary string where each bit is preceded by its 1-based index in the format: [i=INDEX] BIT. For example, the string:
+
+    [i=1] 1 [i=2] 0 [i=3] 1
+
+    represents the binary sequence 101. Use the index and bit values as needed for your task (e.g., computing parity or identifying bit positions).
+    """
+
 def read_pdf(pdf_path: str) -> str:
     """
     Read text content from a PDF file.
@@ -103,26 +111,26 @@ Your task is to combine their analyses into a coherent, comprehensive response t
 
     return worker_prompt, manager_prompt 
 
-def get_majority_vote_prompt() -> str:
+def get_majority_vote_prompt(index_hints: bool=False) -> str:
     """
     Get the system prompt for majority vote synthesis.
     
     Returns:
         str: The majority vote synthesis prompt
     """
-    return """You are a reasoning agent tasked with finding the best answer to a problem.
-
-    Given the user's query and the input text, you need to:
-    1. Carefully read and understand the problem being asked
-    2. Analyze the provided information systematically
-    3. Think through the solution step-by-step
-    4. Show your reasoning process clearly
+    prompt = """You are a reasoning agent responsible for analyzing a portion of a document.
+    Your task is to provide an analysis of the binary string provided in your chunk and determine if it is even or odd parity. To compute the parity, follow these steps:
+    1. Count the number of '1's in the binary string.
+    2. If the count is even, return '0'.
+    3. If the count is odd, return '1'.
+    4. Provide your result in a clear and concise manner.
     5. Present the final answer in the format "The answer is: [your answer]"
-
-    Your response must be consice, logical, and directly address the query.
     """
+    if index_hints:
+        prompt += INDEX_HINT_STRING
+    return prompt
 
-def get_prefix_sum_prompt() -> str:
+def get_prefix_sum_prompt(index_hints: bool=False) -> str:
     """
     Get the system prompt for prefix sum calculation.
     
@@ -141,9 +149,12 @@ def get_prefix_sum_prompt() -> str:
     4. If both results are 1, return 'even'.
     5. Present the final answer in the format "The answer is: [your answer]"
     """
+    if index_hints:
+        worker_prompt += INDEX_HINT_STRING
+        manager_prompt += INDEX_HINT_STRING
     return worker_prompt, manager_prompt
 
-def get_parity_prompt() -> str:
+def get_parity_prompt(index_hints: bool=False) -> str:
     """
     Get the system prompt for parity calculation.
     
@@ -168,7 +179,9 @@ def get_parity_prompt() -> str:
     5. If the count of '1' responses is odd, the overall parity is 'odd'.
     6. Return the final parity result.
     """
-
+    if index_hints:
+        worker_prompt += INDEX_HINT_STRING
+        manager_prompt += INDEX_HINT_STRING
     return parity_worker_prompt, parity_manager_prompt
 
 def extract_answer(text):
