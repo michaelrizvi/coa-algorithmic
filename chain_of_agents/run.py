@@ -26,11 +26,11 @@ def main():
     parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="MajorityVotingAgents")
     parser.add_argument("--num_agents", type=int, default=5)
     parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct")
-    parser.add_argument("--max_tokens", type=int, default=512)
+    parser.add_argument("--max_tokens", type=int, default=2048)
     parser.add_argument("--chunk_size", type=int, default=10)
-    parser.add_argument("--num_runs", type=int, default=5)
-    parser.add_argument("--min_seq_length", type=int, default=32)
-    parser.add_argument("--max_seq_length", type=int, default=64)
+    parser.add_argument("--num_runs", type=int, default=10)
+    parser.add_argument("--min_seq_length", type=int, default=6)
+    parser.add_argument("--max_seq_length", type=int, default=6)
     parser.add_argument("--step", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--index_hints", type=bool, default=False, help="Use index hints for the agents")
@@ -76,7 +76,7 @@ def main():
         )
 
 
-    for seq_len in range(args.min_seq_length, args.max_seq_length + 1, args.step):
+    for seq_len in [2**exponent for exponent in range(args.min_seq_length, args.max_seq_length + 1, args.step)]:
         results = []
         for _ in range(args.num_runs):
             bitstring = generate_bitstring(seq_len, index_hints=args.index_hints)

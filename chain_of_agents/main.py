@@ -178,6 +178,7 @@ class MajorityVotingAgents:
                 agent_answers.append(answer)
             else:
                 logger.warning(f"Agent {agent_num+1} returned no valid answer")
+            del worker  # Clean up worker instance
             
         # Perform majority voting on results
         answers = {}
@@ -235,12 +236,9 @@ class PrefixSumAgents:
         """
         logging.info(f"Starting hierarchical_process with input: {input_text} and query: '{query}'")
 
-        assert all(c in "0 1" for c in input_text), "Input must be a binary string"
-        assert (N := len(input_text.replace(" ", ""))) > 0 and (N & (N - 1)) == 0, "Length must be a power of 2"
-
         level_outputs = []
-        worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
         for i, token in enumerate(input_text.replace(" ", "")):
+            worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
             #print("Processing token:", token)  # Debug log
             output = worker.process_chunk(token, query, None)
             logging.info(f"Worker {i} output: {output}")
@@ -248,10 +246,11 @@ class PrefixSumAgents:
                 output = extraction_func(output)
                 logging.info(f"Worker {i} extracted output: {output}")
             level_outputs.append(output)
+            del worker  # Clean up worker instance
 
         round_num = 0
-        manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
         while len(level_outputs) > 1:
+            manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
             logging.info(f"Manager round {round_num} with {len(level_outputs)} inputs")
             next_level = []
             for i in range(0, len(level_outputs), 2):
@@ -262,6 +261,7 @@ class PrefixSumAgents:
                     logging.info(f"Extracted synthesized output: {synthesized}")
                 next_level.append(synthesized)
             level_outputs = next_level
+            del manager  # Clean up manager instance
             round_num += 1
 
         logging.info(f"Final output: {level_outputs[0]}")
