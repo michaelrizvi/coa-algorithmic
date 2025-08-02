@@ -76,7 +76,7 @@ def main():
         )
 
 
-    for seq_len in [2**exponent for exponent in range(args.min_seq_length, args.max_seq_length + 1, args.step)]:
+    for seq_len in [2**exponent for exponent in range(args.min_seq_length, args.max_seq_length + 1)]:
         results = []
         for _ in range(args.num_runs):
             bitstring = generate_bitstring(seq_len, index_hints=args.index_hints)
