@@ -4,6 +4,7 @@ from utils import *
 import logging
 import json
 import random
+import wandb
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,24 +66,38 @@ class ChainOfAgents:
             chunks = split_into_chunks(input_text, self.chunk_size)
         # Process chunks with worker agents
         worker_outputs = []
+        worker_token_usages = []
         previous_cu = None
         
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
             logger.info(f"Chunk content: {chunk}")  # Debug log
             worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
-            output = worker.process_chunk(chunk, query)
-            print("Agent output:", output)  # Debug log
+            response = worker.process_chunk(chunk, query)
             if extraction_func:
-                output = extraction_func(output)
+                output = extraction_func(response["content"])
             worker_outputs.append(output)
-        
+
+            worker_token_usages.append(response["usage"].completion_tokens)
+
+        if worker_token_usages:
+            avg_worker_tokens = sum(worker_token_usages) / len(worker_token_usages)
+            max_worker_tokens = max(worker_token_usages)
+            logger.info(f"Average worker token usage: {avg_worker_tokens:.2f}")
+            logger.info(f"Max worker token usage: {max_worker_tokens}")
+            if wandb.run:
+                wandb.log({"average_worker_token_usage": avg_worker_tokens, "max_worker_token_usage": max_worker_tokens})
+
         # Synthesize results with manager agent
         manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
-        final_output = manager.synthesize(worker_outputs, query)
+        manager_response = manager.synthesize(worker_outputs, query)
         if extraction_func:
-            final_output = extraction_func(final_output)
-        
+            final_output = extraction_func(manager_response["content"])
+
+        manager_token_usage = manager_response["usage"].completion_tokens
+        logger.info(f"Manager token usage: {manager_token_usage}")
+        if wandb.run:
+            wandb.log({"manager_token_usage": manager_token_usage})
         return final_output 
     
     def process_stream(self, input_text: str, query: str) -> Iterator[Dict[str, str]]:
@@ -160,45 +175,42 @@ class MajorityVotingAgents:
         logger.info(f"Initialized Majority Voting with {self.num_agents} agents using model {self.model}")
     
     def process(self, input_text: str, query: str) -> str:
-        """
-        Process input using multiple agents and perform majority voting.
-        
-        Args:
-            input_text: The input text to process
-            query: The user's query about the text
-            
-        Returns:
-            str: The most common response from the agents
-        """
-        # Create multiple agent instances and collect their outputs
         agent_answers = []
-        
+        token_usages = []
+
         for agent_num in range(self.num_agents):
             logger.info(f"Running agent {agent_num+1}/{self.num_agents}")
             
-            # Create worker agent and process the complete input
             worker = WorkerAgent(self.model, self.prompt, max_tokens=self.max_tokens)
             result = worker.process_chunk(input_text, query, None)
-            #print("Agent output:", result)  # Debug log
-            answer = extract_answer(result)
+            
+            answer = extract_answer(result["content"])
             if answer:
                 agent_answers.append(answer)
             else:
                 logger.warning(f"Agent {agent_num+1} returned no valid answer")
-            del worker  # Clean up worker instance
             
-        # Perform majority voting on results
+            token_usages.append(result["usage"].completion_tokens)
+            
+            del worker
+
+        # Log token stats
+        if token_usages:
+            avg_tokens = sum(token_usages) / len(token_usages)
+            max_tokens = max(token_usages)
+            logger.info(f"Average token usage: {avg_tokens:.2f}")
+            logger.info(f"Max token usage: {max_tokens}")
+            if wandb.run:
+                wandb.log({"average_token_usage": avg_tokens, "max_token_usage": max_tokens})
+
         answers = {}
         for output in agent_answers:
-            if output in answers:
-                answers[output] += 1
-            else:
-                answers[output] = 1
-        
-        # Find the most common answer
+            answers[output] = answers.get(output, 0) + 1
+
         most_common_answer = max(answers.items(), key=lambda x: x[1])[0]
         
         return most_common_answer
+
 
 
 class PrefixSumAgents:
@@ -257,17 +269,26 @@ class PrefixSumAgents:
         while len(level_outputs) > 1:
             logging.info(f"Manager round {round_num} with {len(level_outputs)} inputs")
             next_level = []
+            token_usages =[]
             for i in range(0, len(level_outputs), self.b):
                 manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
                 chunk = level_outputs[i:i+self.b]
-                print(chunk)
-                synthesized = manager.synthesize(chunk, query)
-                logging.info(f"Manager input: {chunk} -> {synthesized}")
+                output = manager.synthesize(chunk, query)
+                logging.info(f"Manager input: {chunk} -> {output['content']}")
                 if extraction_func:
-                    synthesized = extraction_func(synthesized)
-                    logging.info(f"Extracted synthesized output: {synthesized}")
+                    synthesized = extraction_func(output["content"])
+                
+                token_usages.append(output["usage"].completion_tokens)
                 next_level.append(synthesized)
                 del manager
+            # Log token usage for this round
+            if token_usages:
+                avg_tokens = sum(token_usages) / len(token_usages)
+                max_tokens = max(token_usages)
+                logging.info(f"Round {round_num} average token usage: {avg_tokens:.2f}")
+                logging.info(f"Round {round_num} max token usage: {max_tokens}")
+                if wandb.run:
+                    wandb.log({f"round_{round_num}_average_token_usage": avg_tokens, f"round_{round_num}_max_token_usage": max_tokens})
             level_outputs = next_level
             round_num += 1
 
@@ -275,53 +296,43 @@ class PrefixSumAgents:
         return level_outputs[0]
 
 
-if __name__ == "__main__":
-    # Example usage
-    seq_len = 64 
-    input_text = generate_bitstring(seq_len, index_hints=True)  # Generate a random binary string
-    print(input_text)  # Print the generated binary string
-    query = "What is the parity of the given binary string?"
-    
-    # MAJ VOTING 
-    #maj_vote = MajorityVotingAgents(num_agents=5, max_tokens=2048)
+def test_majority_voting(query, input_text):
+    maj_vote = MajorityVotingAgents(num_agents=5, max_tokens=2048)
+    result = maj_vote.process(input_text, query)
+    print(f"Majority Voting Result: {result}")
 
-    #result = maj_vote.process(input_text, query)
-    #print(f"Majority Voting Result: {result}")
-    ## This will print the most common response from the agents
-
-    ## Ground truth result
-    #parity = "even" if input_text.count('1') % 2 == 0 else "odd"
-    #print(f"Ground truth parity: {parity}")
-    #print(f"Number of 1s in input: {input_text.count('1')}")
-    
-    # CHAIN OF AGENTS 
+def test_coa(query, input_text):
     parity_worker_prompt, parity_manager_prompt = get_parity_prompt()
     coa = ChainOfAgents(
         worker_model="lgai/exaone-3-5-32b-instruct",
         manager_model="lgai/exaone-3-5-32b-instruct",
-        chunk_size=10,  # Reduced chunk size for better handling
+        chunk_size=10,
         worker_prompt=parity_worker_prompt,
         manager_prompt=parity_manager_prompt,
-        max_tokens_worker=1024,
-        use_index_hints=True
+        max_tokens_worker=1024
     )
-
     final_output = coa.process(input_text, query, extraction_func=extract_answer)
- 
-    print(f"Final synthesized output: {final_output}")
+    print(f"Chain-of-Agents Result: {final_output}")
 
-    # PREFIX SUM AGENTS 
+def test_prefix_sum(query, input_text):
     prefix_sum_agents = PrefixSumAgents(
         worker_model="lgai/exaone-3-5-32b-instruct",
         manager_model="lgai/exaone-3-5-32b-instruct",
-        max_tokens_worker=512,
-        max_tokens_manager=512,
-        branching_factor=4 
+        max_tokens_worker=64,
+        max_tokens_manager=64
     )
     final_output = prefix_sum_agents.hierarchical_process(input_text, query, extraction_func=extract_answer)
-    print(f"Hierarchical processing result: {final_output}")
+    print(f"Prefix Sum Result: {final_output}")
 
-    # Ground truth result
+if __name__ == "__main__":
+    seq_len = 32 
+    input_text = ' '.join(random.choice(['0', '1']) for _ in range(seq_len))
+    query = "What is the parity of the given binary string?"
+
+    #test_majority_voting(query, input_text)
+    #test_coa(query, input_text)
+    test_prefix_sum(query, input_text)
+
     parity = "even" if input_text.count('1') % 2 == 0 else "odd"
     print(f"Ground truth parity: {parity}")
     print(f"Number of 1s in input: {input_text.count('1')}")

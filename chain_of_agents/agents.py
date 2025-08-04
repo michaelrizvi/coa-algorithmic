@@ -42,8 +42,10 @@ class WorkerAgent:
             temperature=self.temperature,
             max_tokens=self.max_tokens
         )
-        
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        usage = response.usage if hasattr(response, "usage") else {}  # Adjust based on Together's response schema
+
+        return {"content": content, "usage": usage} 
     
     async def process_chunk_stream(self, chunk: str, query: str, previous_cu: Optional[str] = None) -> Iterator[str]:
         """Process a chunk with streaming (for future implementation)."""
@@ -106,9 +108,10 @@ class ManagerAgent:
             temperature=self.temperature,
             max_new_tokens=self.max_new_tokens
         )
-        
-        return response.choices[0].message.content
-    
+        content = response.choices[0].message.content
+        usage = response.usage if hasattr(response, "usage") else {}  # Adjust based on Together's response schema
+        return {"content": content, "usage": usage}
+
     async def synthesize_stream(self, worker_outputs: List[str], query: str) -> Iterator[str]:
         """Synthesize with streaming (for future implementation)."""
         combined_outputs = "\n\n".join(f"Worker {i+1}: {output}" 
