@@ -13,14 +13,14 @@ import tabulate
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="ChainOfAgents", help="Type of agent to use")
-    parser.add_argument("--num_agents", type=int, default=5, help="Number of agents to use in MajVote setup")
+    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="PrefixSumAgents", help="Type of agent to use")
+    parser.add_argument("--num_agents", type=int, default=2, help="Number of agents to use in MajVote setup")
     parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
     parser.add_argument("--chunk_size", type=int, default=8, help="Chunk size for Chain of Agents")
-    parser.add_argument("--num_runs", type=int, default=50, help="Number of runs to perform")
-    parser.add_argument("--min_seq_length", type=int, default=6, help="Minimum sequence length for input")
-    parser.add_argument("--max_seq_length", type=int, default=6, help="Maximum sequence length for input")
+    parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
+    parser.add_argument("--min_seq_length", type=int, default=3, help="Minimum sequence length for input")
+    parser.add_argument("--max_seq_length", type=int, default=3, help="Maximum sequence length for input")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--index_hints", type=bool, default=False, help="Use index hints for the agents")
     parser.add_argument("--branching_factor", type=int, default=2, help="branching factor for prefix sum agents")
@@ -44,7 +44,12 @@ def main():
         "ChainOfAgents": "coa",
         "PrefixSumAgents": "prefix-sum"
     }
-    run_name = f"{name_dict[args.agent_type]}_seq{args.min_seq_length}-{args.max_seq_length}_agents{args.num_agents}"
+    if args.agent_type == "MajorityVotingAgents":
+        run_name = f"{name_dict[args.agent_type]}_seq{args.min_seq_length}-{args.max_seq_length}_agents{args.num_agents}"
+    elif args.agent_type == "ChainOfAgents":
+        run_name = f"{name_dict[args.agent_type]}_seq{args.min_seq_length}-{args.max_seq_length}_chunk{args.chunk_size}"
+    elif args.agent_type == "PrefixSumAgents":
+        run_name = f"{name_dict[args.agent_type]}_seq{args.min_seq_length}-{args.max_seq_length}_b{args.branching_factor}"
     wandb.init(project="coa-parity-eval", config=vars(args), name=run_name, reinit=True)
     logger = setup_logger()
 

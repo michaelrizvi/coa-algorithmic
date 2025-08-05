@@ -67,6 +67,7 @@ class ChainOfAgents:
         # Process chunks with worker agents
         worker_outputs = []
         worker_token_usages = []
+        worker_prompt_tokens = []
         previous_cu = None
         
         for i, chunk in enumerate(chunks):
@@ -79,14 +80,30 @@ class ChainOfAgents:
             worker_outputs.append(output)
 
             worker_token_usages.append(response["usage"].completion_tokens)
+            chunk_prompt_tokens = getattr(response["usage"], 'prompt_tokens', 0)
+            worker_prompt_tokens.append(chunk_prompt_tokens)
+            logger.info(f"Worker chunk {i+1} prompt tokens: {chunk_prompt_tokens}")
+            if wandb.run:
+                wandb.log({f"worker_chunk_{i+1}_prompt_tokens": chunk_prompt_tokens})
 
         if worker_token_usages:
             avg_worker_tokens = sum(worker_token_usages) / len(worker_token_usages)
             max_worker_tokens = max(worker_token_usages)
-            logger.info(f"Average worker token usage: {avg_worker_tokens:.2f}")
-            logger.info(f"Max worker token usage: {max_worker_tokens}")
+            logger.info(f"Average worker completion tokens: {avg_worker_tokens:.2f}")
+            logger.info(f"Max worker completion tokens: {max_worker_tokens}")
+            
+            avg_worker_prompt_tokens = sum(worker_prompt_tokens) / len(worker_prompt_tokens)
+            max_worker_prompt_tokens = max(worker_prompt_tokens)
+            logger.info(f"Average worker prompt tokens: {avg_worker_prompt_tokens:.2f}")
+            logger.info(f"Max worker prompt tokens: {max_worker_prompt_tokens}")
+            
             if wandb.run:
-                wandb.log({"average_worker_token_usage": avg_worker_tokens, "max_worker_token_usage": max_worker_tokens})
+                wandb.log({
+                    "average_worker_completion_tokens": avg_worker_tokens, 
+                    "max_worker_completion_tokens": max_worker_tokens,
+                    "average_worker_prompt_tokens": avg_worker_prompt_tokens,
+                    "max_worker_prompt_tokens": max_worker_prompt_tokens
+                })
 
         # Synthesize results with manager agent
         manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
@@ -94,10 +111,12 @@ class ChainOfAgents:
         if extraction_func:
             final_output = extraction_func(manager_response["content"])
 
-        manager_token_usage = manager_response["usage"].completion_tokens
-        logger.info(f"Manager token usage: {manager_token_usage}")
+        manager_completion_tokens = manager_response["usage"].completion_tokens
+        manager_prompt_tokens = getattr(manager_response["usage"], 'prompt_tokens', 0)
+        logger.info(f"Manager completion tokens: {manager_completion_tokens}")
+        logger.info(f"Manager prompt tokens: {manager_prompt_tokens}")
         if wandb.run:
-            wandb.log({"manager_token_usage": manager_token_usage})
+            wandb.log({"manager_completion_tokens": manager_completion_tokens, "manager_prompt_tokens": manager_prompt_tokens})
         return final_output 
     
     def process_stream(self, input_text: str, query: str) -> Iterator[Dict[str, str]]:
@@ -190,7 +209,12 @@ class MajorityVotingAgents:
             else:
                 logger.warning(f"Agent {agent_num+1} returned no valid answer")
             
-            token_usages.append(result["usage"].completion_tokens)
+            completion_tokens = result["usage"].completion_tokens
+            prompt_tokens = getattr(result["usage"], 'prompt_tokens', 0)
+            token_usages.append(completion_tokens)
+            logger.info(f"Agent {agent_num+1} prompt tokens: {prompt_tokens}")
+            if wandb.run:
+                wandb.log({f"agent_{agent_num+1}_prompt_tokens": prompt_tokens, f"agent_{agent_num+1}_completion_tokens": completion_tokens})
             
             del worker
 
@@ -198,10 +222,10 @@ class MajorityVotingAgents:
         if token_usages:
             avg_tokens = sum(token_usages) / len(token_usages)
             max_tokens = max(token_usages)
-            logger.info(f"Average token usage: {avg_tokens:.2f}")
-            logger.info(f"Max token usage: {max_tokens}")
+            logger.info(f"Average completion tokens: {avg_tokens:.2f}")
+            logger.info(f"Max completion tokens: {max_tokens}")
             if wandb.run:
-                wandb.log({"average_token_usage": avg_tokens, "max_token_usage": max_tokens})
+                wandb.log({"average_completion_tokens": avg_tokens, "max_completion_tokens": max_tokens})
 
         answers = {}
         for output in agent_answers:
@@ -278,17 +302,22 @@ class PrefixSumAgents:
                 if extraction_func:
                     synthesized = extraction_func(output["content"])
                 
-                token_usages.append(output["usage"].completion_tokens)
+                completion_tokens = output["usage"].completion_tokens
+                prompt_tokens = getattr(output["usage"], 'prompt_tokens', 0)
+                token_usages.append(completion_tokens)
+                logger.info(f"Round {round_num} manager {i//self.b} prompt tokens: {prompt_tokens}")
+                if wandb.run:
+                    wandb.log({f"round_{round_num}_manager_{i//self.b}_prompt_tokens": prompt_tokens, f"round_{round_num}_manager_{i//self.b}_completion_tokens": completion_tokens})
                 next_level.append(synthesized)
                 del manager
             # Log token usage for this round
             if token_usages:
                 avg_tokens = sum(token_usages) / len(token_usages)
                 max_tokens = max(token_usages)
-                logging.info(f"Round {round_num} average token usage: {avg_tokens:.2f}")
-                logging.info(f"Round {round_num} max token usage: {max_tokens}")
+                logging.info(f"Round {round_num} average completion tokens: {avg_tokens:.2f}")
+                logging.info(f"Round {round_num} max completion tokens: {max_tokens}")
                 if wandb.run:
-                    wandb.log({f"round_{round_num}_average_token_usage": avg_tokens, f"round_{round_num}_max_token_usage": max_tokens})
+                    wandb.log({f"round_{round_num}_average_completion_tokens": avg_tokens, f"round_{round_num}_max_completion_tokens": max_tokens})
             level_outputs = next_level
             round_num += 1
 
