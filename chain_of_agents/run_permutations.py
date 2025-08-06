@@ -12,15 +12,14 @@ import tabulate
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="PrefixSumAgents", help="Type of agent to use")
+    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="ChainOfAgents", help="Type of agent to use")
     parser.add_argument("--num_agents", type=int, default=3, help="Number of agents to use in MajVote setup")
     parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
     parser.add_argument("--chunk_size", type=int, default=2, help="Chunk size for Chain of Agents (number of swaps)")
     parser.add_argument("--num_runs", type=int, default=10, help="Number of runs to perform")
-    parser.add_argument("--min_elements", type=int, default=5, help="Minimum number of elements in permutation")
-    parser.add_argument("--max_elements", type=int, default=5, help="Maximum number of elements in permutation")
-    parser.add_argument("--min_swaps", type=int, default=16, help="Minimum number of swaps")
+    parser.add_argument("--num_elements", type=int, default=5, help="Number of elements in permutation")
+    parser.add_argument("--min_swaps", type=int, default=4, help="Minimum number of swaps")
     parser.add_argument("--max_swaps", type=int, default=16, help="Maximum number of swaps")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--branching_factor", type=int, default=2, help="Branching factor for prefix sum agents")
@@ -46,11 +45,11 @@ def main():
     }
     
     if args.agent_type == "MajorityVotingAgents":
-        run_name = f"{name_dict[args.agent_type]}_elements{args.min_elements}-{args.max_elements}_agents{args.num_agents}_swaps{args.min_swaps}-{args.max_swaps}"
+        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_agents{args.num_agents}_swaps{args.min_swaps}-{args.max_swaps}"
     elif args.agent_type == "ChainOfAgents":
-        run_name = f"{name_dict[args.agent_type]}_elements{args.min_elements}-{args.max_elements}_chunk{args.chunk_size}_swaps{args.min_swaps}-{args.max_swaps}"
+        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_chunk{args.chunk_size}_swaps{args.min_swaps}-{args.max_swaps}"
     elif args.agent_type == "PrefixSumAgents":
-        run_name = f"{name_dict[args.agent_type]}_elements{args.min_elements}-{args.max_elements}_b{args.branching_factor}_swaps{args.min_swaps}-{args.max_swaps}"
+        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_b{args.branching_factor}_swaps{args.min_swaps}-{args.max_swaps}"
     
     wandb.init(project="coa-permutation-eval", config=vars(args), name=run_name, reinit=True)
     logger = setup_logger()
@@ -87,19 +86,18 @@ def main():
             branching_factor=args.branching_factor,
         )
 
-    # Run experiments for different numbers of elements
-    for num_elements in range(args.min_elements, args.max_elements + 1):
+    # Run experiments for different numbers of swaps
+    for num_swaps in range(args.min_swaps, args.max_swaps + 1):
         exact_match_results = []
         element_accuracy_results = []
         
         for run_idx in range(args.num_runs):
             # Generate permutation problem
-            num_swaps = random.randint(args.min_swaps, args.max_swaps)
-            swap_sequence, true_positions = generate_permutation_problem(n=num_elements, num_swaps=num_swaps)
+            swap_sequence, true_positions = generate_permutation_problem(n=args.num_elements, num_swaps=num_swaps)
             
             query = "What is the final position of each ball after all swaps?"
             
-            logger.info(f"Run {run_idx+1}/{args.num_runs} - Elements: {num_elements}, Swaps: {num_swaps}")
+            logger.info(f"Run {run_idx+1}/{args.num_runs} - Elements: {args.num_elements}, Swaps: {num_swaps}")
             logger.info(f"Swap sequence: {swap_sequence}")
             logger.info(f"True positions: {true_positions}")
             
@@ -151,15 +149,15 @@ def main():
         max_exact_match = max(exact_match_results)
         max_element_accuracy = max(element_accuracy_results)
         
-        logger.info(f"Elements={num_elements}, AvgExactMatch={avg_exact_match:.3f}, AvgElementAccuracy={avg_element_accuracy:.3f}")
-        logger.info(f"Elements={num_elements}, MaxExactMatch={max_exact_match:.3f}, MaxElementAccuracy={max_element_accuracy:.3f}")
+        logger.info(f"Swaps={num_swaps}, AvgExactMatch={avg_exact_match:.3f}, AvgElementAccuracy={avg_element_accuracy:.3f}")
+        logger.info(f"Swaps={num_swaps}, MaxExactMatch={max_exact_match:.3f}, MaxElementAccuracy={max_element_accuracy:.3f}")
         
         wandb.log({
             "avg_exact_match": avg_exact_match,
             "avg_element_accuracy": avg_element_accuracy,
             "max_exact_match": max_exact_match,
             "max_element_accuracy": max_element_accuracy,
-            "num_elements": num_elements
+            "num_swaps": num_swaps
         })
 
 
