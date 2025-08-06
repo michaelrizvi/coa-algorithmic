@@ -2,7 +2,8 @@ import argparse
 import random
 import logging
 import wandb
-from statistics import mean
+from statistics import mean, stdev
+import math
 
 from logger import setup_logger
 from main import MajorityVotingAgents, ChainOfAgents, PrefixSumAgents
@@ -12,15 +13,15 @@ import tabulate
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="ChainOfAgents", help="Type of agent to use")
+    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="PrefixSumAgents", help="Type of agent to use")
     parser.add_argument("--num_agents", type=int, default=3, help="Number of agents to use in MajVote setup")
     parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
     parser.add_argument("--chunk_size", type=int, default=2, help="Chunk size for Chain of Agents (number of swaps)")
-    parser.add_argument("--num_runs", type=int, default=10, help="Number of runs to perform")
+    parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
     parser.add_argument("--num_elements", type=int, default=5, help="Number of elements in permutation")
-    parser.add_argument("--min_swaps", type=int, default=16, help="Minimum number of swaps")
-    parser.add_argument("--max_swaps", type=int, default=16, help="Maximum number of swaps")
+    parser.add_argument("--min_swaps", type=int, default=32, help="Minimum number of swaps")
+    parser.add_argument("--max_swaps", type=int, default=32, help="Maximum number of swaps")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--branching_factor", type=int, default=2, help="Branching factor for prefix sum agents")
     args = parser.parse_args()
@@ -143,13 +144,24 @@ def main():
                 exact_match_results.append(0)
                 element_accuracy_results.append(0.0)
         
-        # Calculate and log averages for this element count
+        # Calculate statistics for this swap count
         avg_exact_match = mean(exact_match_results)
         avg_element_accuracy = mean(element_accuracy_results)
         max_exact_match = max(exact_match_results)
         max_element_accuracy = max(element_accuracy_results)
         
-        logger.info(f"Swaps={num_swaps}, AvgExactMatch={avg_exact_match:.3f}, AvgElementAccuracy={avg_element_accuracy:.3f}")
+        # Calculate standard error (SE = std_dev / sqrt(n))
+        n_runs = len(exact_match_results)
+        if n_runs > 1:
+            std_exact_match = stdev(exact_match_results)
+            std_element_accuracy = stdev(element_accuracy_results)
+            se_exact_match = std_exact_match / math.sqrt(n_runs)
+            se_element_accuracy = std_element_accuracy / math.sqrt(n_runs)
+        else:
+            std_exact_match = se_exact_match = 0.0
+            std_element_accuracy = se_element_accuracy = 0.0
+        
+        logger.info(f"Swaps={num_swaps}, AvgExactMatch={avg_exact_match:.3f}±{se_exact_match:.3f}, AvgElementAccuracy={avg_element_accuracy:.3f}±{se_element_accuracy:.3f}")
         logger.info(f"Swaps={num_swaps}, MaxExactMatch={max_exact_match:.3f}, MaxElementAccuracy={max_element_accuracy:.3f}")
         
         wandb.log({
@@ -157,6 +169,10 @@ def main():
             "avg_element_accuracy": avg_element_accuracy,
             "max_exact_match": max_exact_match,
             "max_element_accuracy": max_element_accuracy,
+            "std_exact_match": std_exact_match,
+            "std_element_accuracy": std_element_accuracy,
+            "se_exact_match": se_exact_match,
+            "se_element_accuracy": se_element_accuracy,
             "num_swaps": num_swaps
         })
 
