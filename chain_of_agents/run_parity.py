@@ -13,14 +13,14 @@ import tabulate
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="PrefixSumAgents", help="Type of agent to use")
-    parser.add_argument("--num_agents", type=int, default=2, help="Number of agents to use in MajVote setup")
+    parser.add_argument("--agent_type", choices=["MajorityVotingAgents", "ChainOfAgents", "PrefixSumAgents"], default="MajorityVotingAgents", help="Type of agent to use")
+    parser.add_argument("--num_agents", type=int, default=4, help="Number of agents to use in MajVote setup")
     parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
-    parser.add_argument("--chunk_size", type=int, default=8, help="Chunk size for Chain of Agents")
+    parser.add_argument("--chunk_size", type=int, default=2, help="Chunk size for Chain of Agents")
     parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
     parser.add_argument("--min_seq_length", type=int, default=3, help="Minimum sequence length for input")
-    parser.add_argument("--max_seq_length", type=int, default=3, help="Maximum sequence length for input")
+    parser.add_argument("--max_seq_length", type=int, default=7, help="Maximum sequence length for input")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--index_hints", type=bool, default=False, help="Use index hints for the agents")
     parser.add_argument("--branching_factor", type=int, default=2, help="branching factor for prefix sum agents")
@@ -87,6 +87,7 @@ def main():
 
     for seq_len in [2**exponent for exponent in range(args.min_seq_length, args.max_seq_length + 1)]:
         results = []
+        token_stats = []
         for _ in range(args.num_runs):
             bitstring = generate_bitstring(seq_len, index_hints=args.index_hints)
             query = "What is the parity of the given binary string?"
@@ -96,13 +97,15 @@ def main():
                 input_text = " ".join(bitstring)  # Convert bitstring to space-separated
 
             if args.agent_type == "MajorityVotingAgents":
-                pred = agent.process(input_text, query)
+                result = agent.process(input_text, query)
             elif args.agent_type == "ChainOfAgents":
-                pred = agent.process(input_text, query, extraction_func=extract_answer)
+                result = agent.process(input_text, query, extraction_func=extract_answer)
             elif args.agent_type == "PrefixSumAgents":
-                pred = agent.hierarchical_process(input_text, query, extraction_func=extract_answer)
-            pred = pred.strip().lower()
+                result = agent.hierarchical_process(input_text, query, extraction_func=extract_answer)
+            
+            pred = result['content'].strip().lower()
             pred = "0" if pred == "even" else "1" if pred == "odd" else pred
+            token_stats.append(result['token_usage'])
             print(f"Bitstring: {bitstring}, Predicted Parity: {pred}")
             truth = compute_parity(bitstring)
             print(f"Truth Parity: {truth}")
@@ -112,8 +115,30 @@ def main():
         max_accuracy = max(results)
         logger.info(f"SeqLen={seq_len}, AvgAccuracy={avg_accuracy:.3f}")
         logger.info(f"SeqLen={seq_len}, MaxAccuracy={max_accuracy:.3f}")
-        wandb.log({"avg_accuracy": avg_accuracy, "sequence_length": seq_len})
-        wandb.log({"max_accuracy": max_accuracy, "sequence_length": seq_len})
+        
+        # Calculate average token statistics for this sequence length
+        if token_stats:
+            avg_completion_tokens = mean([stats['avg_completion_tokens'] for stats in token_stats])
+            max_completion_tokens = max([stats['max_completion_tokens'] for stats in token_stats])
+            avg_prompt_tokens = mean([stats['avg_prompt_tokens'] for stats in token_stats])
+            max_prompt_tokens = max([stats['max_prompt_tokens'] for stats in token_stats])
+            
+            logger.info(f"SeqLen={seq_len}, AvgCompletionTokens={avg_completion_tokens:.2f}")
+            logger.info(f"SeqLen={seq_len}, MaxCompletionTokens={max_completion_tokens:.2f}")
+            logger.info(f"SeqLen={seq_len}, AvgPromptTokens={avg_prompt_tokens:.2f}")
+            logger.info(f"SeqLen={seq_len}, MaxPromptTokens={max_prompt_tokens:.2f}")
+            
+            wandb.log({
+                "avg_accuracy": avg_accuracy, 
+                "max_accuracy": max_accuracy,
+                "avg_completion_tokens": avg_completion_tokens,
+                "max_completion_tokens": max_completion_tokens,
+                "avg_prompt_tokens": avg_prompt_tokens,
+                "max_prompt_tokens": max_prompt_tokens,
+                "sequence_length": seq_len
+            })
+        else:
+            wandb.log({"avg_accuracy": avg_accuracy, "max_accuracy": max_accuracy, "sequence_length": seq_len})
 
 if __name__ == "__main__":
     main()

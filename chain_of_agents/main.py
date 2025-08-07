@@ -68,7 +68,7 @@ class ChainOfAgents:
         
         return chunks
     
-    def process(self, input_text: str, query: str, extraction_func = None ) -> str:
+    def process(self, input_text: str, query: str, extraction_func = None ) -> Dict:
         """
         Process a long text input using the Chain of Agents.
         
@@ -77,7 +77,7 @@ class ChainOfAgents:
             query: The user's query about the text
             
         Returns:
-            str: The final response from the manager agent
+            Dict: Dictionary containing final response and token usage statistics
         """
         # Split text into chunks
         if self.use_index_hints:
@@ -126,28 +126,12 @@ class ChainOfAgents:
             worker_token_usages.append(response["usage"].completion_tokens)
             chunk_prompt_tokens = getattr(response["usage"], 'prompt_tokens', 0)
             worker_prompt_tokens.append(chunk_prompt_tokens)
-            logger.info(f"Worker chunk {i+1} prompt tokens: {chunk_prompt_tokens}")
-            if wandb.run:
-                wandb.log({f"worker_chunk_{i+1}_prompt_tokens": chunk_prompt_tokens})
 
         if worker_token_usages:
             avg_worker_tokens = sum(worker_token_usages) / len(worker_token_usages)
             max_worker_tokens = max(worker_token_usages)
-            logger.info(f"Average worker completion tokens: {avg_worker_tokens:.2f}")
-            logger.info(f"Max worker completion tokens: {max_worker_tokens}")
-            
             avg_worker_prompt_tokens = sum(worker_prompt_tokens) / len(worker_prompt_tokens)
             max_worker_prompt_tokens = max(worker_prompt_tokens)
-            logger.info(f"Average worker prompt tokens: {avg_worker_prompt_tokens:.2f}")
-            logger.info(f"Max worker prompt tokens: {max_worker_prompt_tokens}")
-            
-            if wandb.run:
-                wandb.log({
-                    "average_worker_completion_tokens": avg_worker_tokens, 
-                    "max_worker_completion_tokens": max_worker_tokens,
-                    "average_worker_prompt_tokens": avg_worker_prompt_tokens,
-                    "max_worker_prompt_tokens": max_worker_prompt_tokens
-                })
 
         # Synthesize results with manager agent
         manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
@@ -157,11 +141,22 @@ class ChainOfAgents:
 
         manager_completion_tokens = manager_response["usage"].completion_tokens
         manager_prompt_tokens = getattr(manager_response["usage"], 'prompt_tokens', 0)
-        logger.info(f"Manager completion tokens: {manager_completion_tokens}")
-        logger.info(f"Manager prompt tokens: {manager_prompt_tokens}")
-        if wandb.run:
-            wandb.log({"manager_completion_tokens": manager_completion_tokens, "manager_prompt_tokens": manager_prompt_tokens})
-        return final_output 
+        
+        # Calculate total token usage (workers + manager)
+        total_avg_completion_tokens = avg_worker_tokens + manager_completion_tokens if worker_token_usages else manager_completion_tokens
+        total_max_completion_tokens = max_worker_tokens + manager_completion_tokens if worker_token_usages else manager_completion_tokens
+        total_avg_prompt_tokens = avg_worker_prompt_tokens + manager_prompt_tokens if worker_prompt_tokens else manager_prompt_tokens
+        total_max_prompt_tokens = max_worker_prompt_tokens + manager_prompt_tokens if worker_prompt_tokens else manager_prompt_tokens
+        
+        return {
+            'content': final_output,
+            'token_usage': {
+                'avg_completion_tokens': total_avg_completion_tokens,
+                'max_completion_tokens': total_max_completion_tokens,
+                'avg_prompt_tokens': total_avg_prompt_tokens,
+                'max_prompt_tokens': total_max_prompt_tokens
+            }
+        } 
     
     def process_stream(self, input_text: str, query: str) -> Iterator[Dict[str, str]]:
         """Process text with streaming - yields worker and manager messages."""
@@ -237,7 +232,7 @@ class MajorityVotingAgents:
         
         logger.info(f"Initialized Majority Voting with {self.num_agents} agents using model {self.model}")
     
-    def process(self, input_text: str, query: str) -> str:
+    def process(self, input_text: str, query: str) -> Dict:
         agent_answers = []
         token_usages = []
         prompt_token_usages = []
@@ -258,30 +253,28 @@ class MajorityVotingAgents:
             prompt_tokens = getattr(result["usage"], 'prompt_tokens', 0)
             token_usages.append(completion_tokens)
             prompt_token_usages.append(prompt_tokens)
-            if wandb.run:
-                wandb.log({f"agent_{agent_num+1}_completion_tokens": completion_tokens})
             
             del worker
 
-        # Log token stats
+        # Calculate token stats (but don't log individually)
         if token_usages:
             avg_tokens = sum(token_usages) / len(token_usages)
             max_tokens = max(token_usages)
-            logger.info(f"Average completion tokens: {avg_tokens:.2f}")
-            logger.info(f"Max completion tokens: {max_tokens}")
-            
             avg_prompt_tokens = sum(prompt_token_usages) / len(prompt_token_usages)
             max_prompt_tokens = max(prompt_token_usages)
-            logger.info(f"Average prompt tokens: {avg_prompt_tokens:.2f}")
-            logger.info(f"Max prompt tokens: {max_prompt_tokens}")
-            
-            if wandb.run:
-                wandb.log({
-                    "average_completion_tokens": avg_tokens, 
-                    "max_completion_tokens": max_tokens,
-                    "average_prompt_tokens": avg_prompt_tokens,
-                    "max_prompt_tokens": max_prompt_tokens
-                })
+
+        # Handle case where no valid answers were extracted
+        if not agent_answers:
+            logger.warning("No valid answers extracted from any agent")
+            return {
+                'content': "unknown",
+                'token_usage': {
+                    'avg_completion_tokens': avg_tokens if token_usages else 0,
+                    'max_completion_tokens': max_tokens if token_usages else 0,
+                    'avg_prompt_tokens': avg_prompt_tokens if prompt_token_usages else 0,
+                    'max_prompt_tokens': max_prompt_tokens if prompt_token_usages else 0
+                }
+            }
 
         answers = {}
         for output in agent_answers:
@@ -289,7 +282,15 @@ class MajorityVotingAgents:
 
         most_common_answer = max(answers.items(), key=lambda x: x[1])[0]
         
-        return most_common_answer
+        return {
+            'content': most_common_answer,
+            'token_usage': {
+                'avg_completion_tokens': avg_tokens if token_usages else 0,
+                'max_completion_tokens': max_tokens if token_usages else 0,
+                'avg_prompt_tokens': avg_prompt_tokens if prompt_token_usages else 0,
+                'max_prompt_tokens': max_prompt_tokens if prompt_token_usages else 0
+            }
+        }
 
 
 
@@ -315,7 +316,7 @@ class PrefixSumAgents:
         self.manager_prompt = manager_prompt or default_manager_prompt
         self.b = branching_factor  # Branching factor for hierarchical processing
 
-    def hierarchical_process(self, input_text: str, query: str, extraction_func=None) -> str:
+    def hierarchical_process(self, input_text: str, query: str, extraction_func=None) -> Dict:
         """
         Hierarchical processing of input using b-ary tree agent structure.
 
@@ -425,28 +426,26 @@ class PrefixSumAgents:
             level_outputs = next_level
             round_num += 1
             
-        # Log accumulated token statistics after while loop terminates
-        logger.info(f"Sum of max completion tokens across all levels: {sum_of_max_completion_tokens}")
-        logger.info(f"Sum of average completion tokens across all levels: {sum_of_avg_completion_tokens:.2f}")
-        logger.info(f"Sum of max prompt tokens across all levels: {sum_of_max_prompt_tokens}")
-        logger.info(f"Sum of average prompt tokens across all levels: {sum_of_avg_prompt_tokens:.2f}")
-        
-        if wandb.run:
-            wandb.log({
-                "sum_of_max_completion_tokens": sum_of_max_completion_tokens,
-                "sum_of_avg_completion_tokens": sum_of_avg_completion_tokens,
-                "sum_of_max_prompt_tokens": sum_of_max_prompt_tokens,
-                "sum_of_avg_prompt_tokens": sum_of_avg_prompt_tokens
-            })
+        # Token statistics are accumulated but not logged individually
 
         logging.info(f"Final output: {level_outputs[0]}")
-        return level_outputs[0]
+        
+        return {
+            'content': level_outputs[0],
+            'token_usage': {
+                'avg_completion_tokens': sum_of_avg_completion_tokens,
+                'max_completion_tokens': sum_of_max_completion_tokens,
+                'avg_prompt_tokens': sum_of_avg_prompt_tokens,
+                'max_prompt_tokens': sum_of_max_prompt_tokens
+            }
+        }
 
 
 def test_majority_voting(query, input_text):
     maj_vote = MajorityVotingAgents(num_agents=5, max_tokens=2048)
     result = maj_vote.process(input_text, query)
-    print(f"Majority Voting Result: {result}")
+    print(f"Majority Voting Result: {result['content']}")
+    print(f"Token Usage: {result['token_usage']}")
 
 def test_coa(query, input_text):
     parity_worker_prompt, parity_manager_prompt = get_parity_prompt()
@@ -458,8 +457,9 @@ def test_coa(query, input_text):
         manager_prompt=parity_manager_prompt,
         max_tokens_worker=1024
     )
-    final_output = coa.process(input_text, query, extraction_func=extract_answer)
-    print(f"Chain-of-Agents Result: {final_output}")
+    result = coa.process(input_text, query, extraction_func=extract_answer)
+    print(f"Chain-of-Agents Result: {result['content']}")
+    print(f"Token Usage: {result['token_usage']}")
 
 def test_prefix_sum(query, input_text):
     prefix_sum_agents = PrefixSumAgents(
@@ -468,8 +468,9 @@ def test_prefix_sum(query, input_text):
         max_tokens_worker=64,
         max_tokens_manager=64
     )
-    final_output = prefix_sum_agents.hierarchical_process(input_text, query, extraction_func=extract_answer)
-    print(f"Prefix Sum Result: {final_output}")
+    result = prefix_sum_agents.hierarchical_process(input_text, query, extraction_func=extract_answer)
+    print(f"Prefix Sum Result: {result['content']}")
+    print(f"Token Usage: {result['token_usage']}")
 
 if __name__ == "__main__":
     seq_len = 32 

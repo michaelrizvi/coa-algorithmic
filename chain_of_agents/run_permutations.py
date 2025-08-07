@@ -20,8 +20,8 @@ def main():
     parser.add_argument("--chunk_size", type=int, default=2, help="Chunk size for Chain of Agents (number of swaps)")
     parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
     parser.add_argument("--num_elements", type=int, default=5, help="Number of elements in permutation")
-    parser.add_argument("--min_swaps", type=int, default=32, help="Minimum number of swaps")
-    parser.add_argument("--max_swaps", type=int, default=32, help="Maximum number of swaps")
+    parser.add_argument("--min_swaps", type=int, default=20, help="Minimum number of swaps")
+    parser.add_argument("--max_swaps", type=int, default=20, help="Maximum number of swaps")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--branching_factor", type=int, default=2, help="Branching factor for prefix sum agents")
     args = parser.parse_args()
@@ -91,6 +91,7 @@ def main():
     for num_swaps in range(args.min_swaps, args.max_swaps + 1):
         exact_match_results = []
         element_accuracy_results = []
+        token_stats = []
         
         for run_idx in range(args.num_runs):
             # Generate permutation problem
@@ -105,12 +106,14 @@ def main():
             # Get prediction from agent
             try:
                 if args.agent_type == "MajorityVotingAgents":
-                    pred = agent.process(swap_sequence, query)
+                    result = agent.process(swap_sequence, query)
                 elif args.agent_type == "ChainOfAgents":
-                    pred = agent.process(swap_sequence, query, extraction_func=extract_position_dict)
+                    result = agent.process(swap_sequence, query, extraction_func=extract_position_dict)
                 elif args.agent_type == "PrefixSumAgents":
-                    pred = agent.hierarchical_process(swap_sequence, query, extraction_func=extract_position_dict)
+                    result = agent.hierarchical_process(swap_sequence, query, extraction_func=extract_position_dict)
                 
+                pred = result['content']
+                token_stats.append(result['token_usage'])
                 logger.info(f"Raw prediction: {pred}")
                 
                 # Parse prediction
@@ -143,6 +146,13 @@ def main():
                 logger.error(f"Error processing run {run_idx+1}: {str(e)}")
                 exact_match_results.append(0)
                 element_accuracy_results.append(0.0)
+                # Add dummy token stats for failed runs
+                token_stats.append({
+                    'avg_completion_tokens': 0,
+                    'max_completion_tokens': 0,
+                    'avg_prompt_tokens': 0,
+                    'max_prompt_tokens': 0
+                })
         
         # Calculate statistics for this swap count
         avg_exact_match = mean(exact_match_results)
@@ -164,17 +174,45 @@ def main():
         logger.info(f"Swaps={num_swaps}, AvgExactMatch={avg_exact_match:.3f}±{se_exact_match:.3f}, AvgElementAccuracy={avg_element_accuracy:.3f}±{se_element_accuracy:.3f}")
         logger.info(f"Swaps={num_swaps}, MaxExactMatch={max_exact_match:.3f}, MaxElementAccuracy={max_element_accuracy:.3f}")
         
-        wandb.log({
-            "avg_exact_match": avg_exact_match,
-            "avg_element_accuracy": avg_element_accuracy,
-            "max_exact_match": max_exact_match,
-            "max_element_accuracy": max_element_accuracy,
-            "std_exact_match": std_exact_match,
-            "std_element_accuracy": std_element_accuracy,
-            "se_exact_match": se_exact_match,
-            "se_element_accuracy": se_element_accuracy,
-            "num_swaps": num_swaps
-        })
+        # Calculate average token statistics for this number of swaps
+        if token_stats:
+            avg_completion_tokens = mean([stats['avg_completion_tokens'] for stats in token_stats])
+            max_completion_tokens = max([stats['max_completion_tokens'] for stats in token_stats])
+            avg_prompt_tokens = mean([stats['avg_prompt_tokens'] for stats in token_stats])
+            max_prompt_tokens = max([stats['max_prompt_tokens'] for stats in token_stats])
+            
+            logger.info(f"Swaps={num_swaps}, AvgCompletionTokens={avg_completion_tokens:.2f}")
+            logger.info(f"Swaps={num_swaps}, MaxCompletionTokens={max_completion_tokens:.2f}")
+            logger.info(f"Swaps={num_swaps}, AvgPromptTokens={avg_prompt_tokens:.2f}")
+            logger.info(f"Swaps={num_swaps}, MaxPromptTokens={max_prompt_tokens:.2f}")
+            
+            wandb.log({
+                "avg_exact_match": avg_exact_match,
+                "avg_element_accuracy": avg_element_accuracy,
+                "max_exact_match": max_exact_match,
+                "max_element_accuracy": max_element_accuracy,
+                "std_exact_match": std_exact_match,
+                "std_element_accuracy": std_element_accuracy,
+                "se_exact_match": se_exact_match,
+                "se_element_accuracy": se_element_accuracy,
+                "avg_completion_tokens": avg_completion_tokens,
+                "max_completion_tokens": max_completion_tokens,
+                "avg_prompt_tokens": avg_prompt_tokens,
+                "max_prompt_tokens": max_prompt_tokens,
+                "num_swaps": num_swaps
+            })
+        else:
+            wandb.log({
+                "avg_exact_match": avg_exact_match,
+                "avg_element_accuracy": avg_element_accuracy,
+                "max_exact_match": max_exact_match,
+                "max_element_accuracy": max_element_accuracy,
+                "std_exact_match": std_exact_match,
+                "std_element_accuracy": std_element_accuracy,
+                "se_exact_match": se_exact_match,
+                "se_element_accuracy": se_element_accuracy,
+                "num_swaps": num_swaps
+            })
 
 
 if __name__ == "__main__":
