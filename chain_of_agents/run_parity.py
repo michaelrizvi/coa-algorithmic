@@ -97,7 +97,7 @@ def main():
                 input_text = " ".join(bitstring)  # Convert bitstring to space-separated
 
             if args.agent_type == "MajorityVotingAgents":
-                result = agent.process(input_text, query)
+                result = agent.process(input_text, query, extraction_func=extract_answer)
             elif args.agent_type == "ChainOfAgents":
                 result = agent.process(input_text, query, extraction_func=extract_answer)
             elif args.agent_type == "PrefixSumAgents":

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict, Tuple
 import logging
 import fitz  # PyMuPDF
 import re
@@ -477,3 +477,156 @@ def generate_permutation_problem(n: int = 5, num_swaps: int = None) -> tuple[str
     problem_description = " ".join(problem_parts)
     
     return problem_description, positions
+
+
+# K-hop task utilities
+
+def get_khop_entities() -> List[str]:
+    """Generate a list of 50 balanced single-token entity names."""
+    male_names = [
+        "Adam", "Ben", "Carl", "Dan", "Emil", "Frank", "Gary", "Henry", "Ian", "Jack",
+        "Kevin", "Leo", "Max", "Noah", "Owen", "Paul", "Quinn", "Ryan", "Sam", "Tom",
+        "Victor", "Will", "Xavier", "York", "Zane"
+    ]
+    
+    female_names = [
+        "Alice", "Beth", "Carol", "Diana", "Emma", "Fiona", "Grace", "Helen", "Iris", "Jane",
+        "Kate", "Lucy", "Mary", "Nina", "Olivia", "Paula", "Rose", "Sarah", "Tina", "Uma",
+        "Vera", "Wendy", "Zoe", "Ana", "Eva"
+    ]
+    
+    return male_names + female_names
+
+
+def get_khop_relations() -> List[str]:
+    """Generate a list of 20 diverse single-token relations."""
+    return [
+        "boss", "instructor", "teacher", "advisor", "supervisor", "mentor", "coach", 
+        "manager", "leader", "director", "guide", "trainer", "tutor", "professor",
+        "captain", "chief", "head", "principal", "coordinator", "facilitator"
+    ]
+
+
+def generate_khop_problem(k: int, n: int, entities: List[str], relations: List[str]) -> Tuple[str, str, str]:
+    """
+    Generate a K-hop reasoning problem.
+    
+    Args:
+        k: Number of hops needed to solve the query
+        n: Total number of facts to include
+        entities: List of entity names
+        relations: List of relation names
+        
+    Returns:
+        Tuple of (facts_string, query, ground_truth_answer)
+    """
+    if n < k:
+        raise ValueError(f"Number of facts ({n}) must be at least number of hops ({k})")
+    
+    # Generate the chain for the query (ground truth path)
+    query_entities = random.sample(entities, k + 1)  # k+1 entities for k relations
+    query_relations = random.sample(relations, k)
+    
+    # Create the chain: entity0 -> rel0 -> entity1 -> rel1 -> entity2 -> ... -> entityK
+    ground_truth_facts = []
+    for i in range(k):
+        fact = f"{query_entities[i]}'s {query_relations[i]} is {query_entities[i + 1]}"
+        ground_truth_facts.append(fact)
+    
+    # Generate additional random facts (n - k facts)
+    additional_facts = []
+    used_pairs = set()
+    
+    # Track the pairs we've already used in ground truth
+    for i in range(k):
+        used_pairs.add((query_entities[i], query_relations[i]))
+    
+    remaining_entities = [e for e in entities if e not in query_entities]
+    remaining_relations = [r for r in relations if r not in query_relations] + query_relations  # Can reuse relations
+    
+    attempts = 0
+    max_attempts = 1000
+    
+    while len(additional_facts) < (n - k) and attempts < max_attempts:
+        attempts += 1
+        
+        # Pick entities (can reuse entities not in query path, or use completely new ones)
+        entity1 = random.choice(entities)
+        entity2 = random.choice(entities)
+        relation = random.choice(relations)
+        
+        # Avoid conflicts with ground truth and duplicates
+        if (entity1, relation) not in used_pairs and entity1 != entity2:
+            fact = f"{entity1}'s {relation} is {entity2}"
+            if fact not in additional_facts and fact not in ground_truth_facts:
+                additional_facts.append(fact)
+                used_pairs.add((entity1, relation))
+    
+    # Combine all facts and shuffle them
+    all_facts = ground_truth_facts + additional_facts
+    random.shuffle(all_facts)
+    
+    # Create the query
+    query_chain = []
+    for i in range(k-1, -1, -1):  # Reverse order for query
+        query_chain.append(f"the {query_relations[i]}")
+    
+    query = f"Who is {' of '.join(query_chain)} of {query_entities[0]}?"
+    ground_truth_answer = query_entities[-1]
+    
+    # Format facts as a single string
+    facts_string = ". ".join(all_facts) + "."
+    
+    return facts_string, query, ground_truth_answer
+
+
+def extract_khop_answer(response: str) -> str:
+    """
+    Extract answer from K-hop response in format 'Answer: [EntityName]'.
+    
+    Args:
+        response: The agent's response
+        
+    Returns:
+        str: Extracted entity name or empty string if not found
+    """
+    # Look for pattern "Answer: EntityName"
+    pattern = r"Answer:\s*([A-Za-z]+)"
+    match = re.search(pattern, response, re.IGNORECASE)
+    
+    if match:
+        return match.group(1).strip()
+    
+    # Fallback: look for any single capitalized word at the end
+    words = response.strip().split()
+    if words:
+        last_word = words[-1].rstrip('.')
+        if last_word.isalpha() and last_word[0].isupper():
+            return last_word
+    
+    return ""
+
+
+def get_khop_majority_vote_prompt() -> str:
+    """Generate prompt for majority voting agents on K-hop task."""
+    return """You are an expert at logical reasoning and following relationship chains. 
+
+Your task is to answer questions about relationships between people by following chains of connections through the given facts.
+
+You will be given:
+1. A set of facts describing relationships between people (e.g., "Alice's boss is Bob")
+2. A query asking about a multi-step relationship chain
+
+Instructions:
+- Read all the facts carefully
+- Follow the relationship chain step by step
+- Track each connection to find the final answer
+- Output your answer in the exact format: Answer: [PersonName]
+
+Example:
+Facts: "John's boss is Mary. Mary's supervisor is Tom."
+Query: "Who is the supervisor of the boss of John?"
+Reasoning: John's boss is Mary → Mary's supervisor is Tom
+Answer: Tom
+
+Be systematic and double-check your reasoning chain."""
