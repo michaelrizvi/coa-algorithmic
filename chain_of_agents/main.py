@@ -667,6 +667,8 @@ class PrefixSumAgents:
         sum_of_avg_completion_tokens = 0
         sum_of_max_prompt_tokens = 0
         sum_of_avg_prompt_tokens = 0
+        all_completion_tokens = []
+        all_prompt_tokens = []
         is_permutation = "Swap ball" in input_text
         
         while len(level_outputs) > 1:
@@ -695,6 +697,10 @@ class PrefixSumAgents:
                 completion_token_usages.append(completion_tokens)
                 prompt_token_usages.append(prompt_tokens)
                 
+                # Collect individual agent token usage
+                all_completion_tokens.append(completion_tokens)
+                all_prompt_tokens.append(prompt_tokens)
+                
                 del manager
                 
             # Accumulate token usage stats for this round
@@ -713,7 +719,23 @@ class PrefixSumAgents:
             level_outputs = next_level
             round_num += 1
             
-        # Token statistics are accumulated but not logged individually
+        # Calculate individual agent token usage statistics
+        mean_completion_tokens = 0
+        max_completion_tokens_single = 0
+        mean_prompt_tokens = 0
+        max_prompt_tokens_single = 0
+        
+        if all_completion_tokens:
+            mean_completion_tokens = sum(all_completion_tokens) / len(all_completion_tokens)
+            max_completion_tokens_single = max(all_completion_tokens)
+            logger.info(f"Mean completion tokens per agent: {mean_completion_tokens:.2f}")
+            logger.info(f"Max completion tokens per agent: {max_completion_tokens_single}")
+            
+        if all_prompt_tokens:
+            mean_prompt_tokens = sum(all_prompt_tokens) / len(all_prompt_tokens)
+            max_prompt_tokens_single = max(all_prompt_tokens)
+            logger.info(f"Mean prompt tokens per agent: {mean_prompt_tokens:.2f}")
+            logger.info(f"Max prompt tokens per agent: {max_prompt_tokens_single}")
 
         logging.info(f"Final output: {level_outputs[0]}")
         
@@ -723,7 +745,11 @@ class PrefixSumAgents:
                 'avg_completion_tokens': sum_of_avg_completion_tokens,
                 'max_completion_tokens': sum_of_max_completion_tokens,
                 'avg_prompt_tokens': sum_of_avg_prompt_tokens,
-                'max_prompt_tokens': sum_of_max_prompt_tokens
+                'max_prompt_tokens': sum_of_max_prompt_tokens,
+                'mean_completion_tokens_per_agent': mean_completion_tokens,
+                'max_completion_tokens_per_agent': max_completion_tokens_single,
+                'mean_prompt_tokens_per_agent': mean_prompt_tokens,
+                'max_prompt_tokens_per_agent': max_prompt_tokens_single
             }
         }
 

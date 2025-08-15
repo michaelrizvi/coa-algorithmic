@@ -177,3 +177,7 @@ cython_debug/
 # wandb stuff
 .wandb/
 wandb/
+
+*.pdf
+*.csv
+*.ipynb
