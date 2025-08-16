@@ -69,8 +69,13 @@ def main():
 
             result = agent.hierarchical_process(input_text, query, extraction_func=extract_answer)
             
-            pred = result['content'].strip().lower()
-            pred = "0" if pred == "even" else "1" if pred == "odd" else pred
+            # Handle case where result['content'] is None
+            if result['content'] is None:
+                pred = "unknown"
+                logger.warning(f"BranchingFactor={branching_factor}, Run={run_idx+1}, Result content is None, setting pred to 'unknown'")
+            else:
+                pred = result['content'].strip().lower()
+                pred = "0" if pred == "even" else "1" if pred == "odd" else pred
             token_stats.append(result['token_usage'])
             
             logger.info(f"BranchingFactor={branching_factor}, Run={run_idx+1}, Bitstring: {bitstring[:20]}..., Predicted Parity: {pred}")
