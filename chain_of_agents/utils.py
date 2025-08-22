@@ -126,11 +126,13 @@ def get_majority_vote_prompt(index_hints: bool=False) -> str:
     3. If the count is odd, return 1.
     4. Present the final answer in the format "The answer is: [your answer]"
     
-    Here is an example of the structure you should follow:
-        Step 1: Count 1's in "10000000" - Total: 1
-        Step 2: Count is odd (1)
-        Step 3: Return 1
-        The answer is: 1
+    Example for "1011":
+    Position 1: 1 (count: 1)
+    Position 2: 0 (count: 1)
+    Position 3: 1 (count: 2)
+    Position 4: 1 (count: 3)
+    Final count: 3 (odd)
+    The answer is: odd
     """
     if index_hints:
         prompt += INDEX_HINT_STRING
@@ -158,9 +160,19 @@ def get_prefix_sum_prompt(index_hints: bool=False, b: int = 2) -> str:
     3. If the parity of the list is odd, return 1.
     5. Present the final answer on a new line in the format "The answer is: [your answer]" 
     
-    IMPORTANT:
-    - Be concise and direct in your response. You MUST think by steps, but do not repeat these instructions in your output.
-    - For long lists with many 1s, carefully double-check your counting to avoid arithmetic errors.
+    IMPORTANT: Show your work step by step to demonstrate thorough analysis:
+    1. Go through each bit position and note its value
+    2. Keep a running count of 1s encountered
+    3. State the final count
+    4. Determine if the count is even or odd
+
+    Example for "1011":
+    Position 1: 1 (count: 1)
+    Position 2: 0 (count: 1)
+    Position 3: 1 (count: 2)
+    Position 4: 1 (count: 3)
+    Final count: 3 (odd)
+    The answer is: odd
     """
     if index_hints:
         worker_prompt += INDEX_HINT_STRING
@@ -182,9 +194,13 @@ def get_parity_prompt(index_hints: bool=False) -> str:
     4. Provide your result in a clear and concise manner.
     5. Present the final answer in the format "The answer is: [your answer]"
     
-    IMPORTANT:
-    - Be concise and direct in your response. You MUST think by steps, but do not repeat these instructions in your output.
-    - For long lists with many 1s, carefully double-check your counting to avoid arithmetic errors.
+    Example for "1011":
+    Position 1: 1 (count: 1)
+    Position 2: 0 (count: 1)
+    Position 3: 1 (count: 2)
+    Position 4: 1 (count: 3)
+    Final count: 3 (odd)
+    The answer is: odd
     """
 
     parity_manager_prompt = """You are a manager agent responsible for synthesizing information from multiple workers.
