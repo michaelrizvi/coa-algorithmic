@@ -242,7 +242,8 @@ class MajorityVotingAgents:
             
             worker = WorkerAgent(self.model, self.prompt, max_tokens=self.max_tokens)
             result = worker.process_chunk(input_text, query, None)
-            
+            print(result['content'])
+
             if extraction_func:
                 answer = extraction_func(result["content"])
                 if answer:

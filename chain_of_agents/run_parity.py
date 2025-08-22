@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--chunk_size", type=int, default=2, help="Chunk size for Chain of Agents")
     parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
     parser.add_argument("--min_seq_length", type=int, default=3, help="Minimum sequence length for input")
-    parser.add_argument("--max_seq_length", type=int, default=7, help="Maximum sequence length for input")
+    parser.add_argument("--max_seq_length", type=int, default=3, help="Maximum sequence length for input")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--index_hints", type=bool, default=False, help="Use index hints for the agents")
     parser.add_argument("--branching_factor", type=int, default=2, help="branching factor for prefix sum agents")

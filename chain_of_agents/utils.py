@@ -125,6 +125,12 @@ def get_majority_vote_prompt(index_hints: bool=False) -> str:
     2. If the count is even, return 0.
     3. If the count is odd, return 1.
     4. Present the final answer in the format "The answer is: [your answer]"
+    
+    Here is an example of the structure you should follow:
+        Step 1: Count 1's in "10000000" - Total: 1
+        Step 2: Count is odd (1)
+        Step 3: Return 1
+        The answer is: 1
     """
     if index_hints:
         prompt += INDEX_HINT_STRING
@@ -139,6 +145,10 @@ def get_prefix_sum_prompt(index_hints: bool=False, b: int = 2) -> str:
     """
     worker_prompt = """You are a worker agent responsible for calculating the parity of a single binary digit. if the digit is 1, you will return 1, otherwise you will return 0.
     Present the final answer in the format "The answer is: [your answer]"
+    
+    IMPORTANT:
+    - Be concise and direct in your response. You MUST think by steps, but do not repeat these instructions in your output.
+    - For long lists with many 1s, carefully double-check your counting to avoid arithmetic errors.
     """
     manager_prompt = f"""You are a manager agent responsible for synthesizing the results of previous workers.
     Your task is to return the parity of the binary string provided by the worker agents. You may think step by step, but your final answer should be concise and clear.
@@ -147,6 +157,10 @@ def get_prefix_sum_prompt(index_hints: bool=False, b: int = 2) -> str:
     2. If the parity of the list is even, return 0.
     3. If the parity of the list is odd, return 1.
     5. Present the final answer on a new line in the format "The answer is: [your answer]" 
+    
+    IMPORTANT:
+    - Be concise and direct in your response. You MUST think by steps, but do not repeat these instructions in your output.
+    - For long lists with many 1s, carefully double-check your counting to avoid arithmetic errors.
     """
     if index_hints:
         worker_prompt += INDEX_HINT_STRING
@@ -167,6 +181,10 @@ def get_parity_prompt(index_hints: bool=False) -> str:
     3. If the count is odd, return 1.
     4. Provide your result in a clear and concise manner.
     5. Present the final answer in the format "The answer is: [your answer]"
+    
+    IMPORTANT:
+    - Be concise and direct in your response. You MUST think by steps, but do not repeat these instructions in your output.
+    - For long lists with many 1s, carefully double-check your counting to avoid arithmetic errors.
     """
 
     parity_manager_prompt = """You are a manager agent responsible for synthesizing information from multiple workers.
@@ -177,6 +195,10 @@ def get_parity_prompt(index_hints: bool=False) -> str:
     4. If the count of 1 responses is even, the overall parity is 0.
     5. If the count of 1 responses is odd, the overall parity is 1.
     6. Present the final answer in the format "The answer is: [your answer]"
+    
+    IMPORTANT:
+    - Be concise and direct in your response. You MUST think by steps, but do not repeat these instructions in your output.
+    - For long lists with many 1s, carefully double-check your counting to avoid arithmetic errors.
     """
     if index_hints:
         parity_worker_prompt += INDEX_HINT_STRING
