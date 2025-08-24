@@ -126,7 +126,7 @@ def get_majority_vote_prompt(index_hints: bool=False) -> str:
     3. If the count is odd, return 1.
     4. Present the final answer in the format "The answer is: [your answer]"
     
-    Example for "1011":
+    You MUST use the following template. Here is an example for "1011":
     1: 1 (count: 1)
     2: 0 (count: 1)
     3: 1 (count: 2)
@@ -166,7 +166,7 @@ def get_prefix_sum_prompt(index_hints: bool=False, b: int = 2) -> str:
     3. State the final count
     4. Determine if the count is even or odd
 
-    Example for "1011":
+    You MUST use the following template. Here is an example for "1011":
     1: 1
     0: 1
     1: 2
@@ -194,7 +194,7 @@ def get_parity_prompt(index_hints: bool=False) -> str:
     4. Provide your result in a clear and concise manner.
     5. Present the final answer in the format "The answer is: [your answer]"
     
-    Example for "1011":
+    You MUST use the following template. Here is an example for "1011":
     1: 1
     0: 1
     1: 2
@@ -212,7 +212,7 @@ def get_parity_prompt(index_hints: bool=False) -> str:
     5. If the count of 1 responses is odd, the overall parity is 1.
     6. Present the final answer in the format "The answer is: [your answer]"
     
-    Example for "1011":
+    You MUST use the following template. Here is an example for "1011":
     1: 1
     0: 1
     1: 2
