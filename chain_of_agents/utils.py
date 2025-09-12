@@ -864,110 +864,56 @@ def get_list_manipulation_prompts(b: int = 2) -> tuple[str, str]:
     Returns:
         tuple[str, str]: (worker_prompt, manager_prompt)
     """
-    worker_prompt = """You are a worker agent in a hierarchical system processing ONE Python list manipulation operation with step-by-step verification.
+    worker_prompt = """You are a worker agent processing ONE Python list manipulation operation.
 
-Your task is to apply exactly one Python operation and report the resulting index mapping with perfect accuracy.
+Task: Apply exactly one Python operation to the current index mapping.
 
-You will receive:
-- Current list state as index mapping (e.g., [a[2], a[0], a[1]] meaning position 0 has original element 2, position 1 has original element 0, etc.)
-- ONE Python operation (e.g., a[0], a[2] = a[2], a[0] or a[::-1])
+You receive:
+- Current state: index mapping like [a[2], a[0], a[1]]
+- ONE operation: Python code like a[0], a[2] = a[2], a[0]
 
-**CHAIN-OF-THOUGHT PROCESS:**
-1. Parse the Python operation syntax carefully
-2. Understand the current state mapping
-3. Apply the operation step-by-step
-4. Verify the result makes sense
-5. Output in exact required format
+**EXAMPLES:**
 
-CRITICAL: Use this EXACT template format for your response:
-
-**Example 1:**
 Input: Current state: [a[0], a[1], a[2]], Operation: a[0], a[2] = a[2], a[0]
-Step 1: Current mapping is [a[0], a[1], a[2]]
-Step 2: Python operation a[0], a[2] = a[2], a[0] swaps elements at positions 0 and 2
-Step 3: Element at position 0 (a[0]) exchanges with element at position 2 (a[2])
-Step 4: New mapping is [a[2], a[1], a[0]]
-Verification: Swapped positions 0 and 2, position 1 unchanged ✓
+Apply: Swap positions 0 and 2
+Result: [a[2], a[1], a[0]]
 The answer is: [a[2], a[1], a[0]]
 
-**Example 2:**
 Input: Current state: [a[1], a[0], a[2]], Operation: a[::-1]
-Step 1: Current mapping is [a[1], a[0], a[2]]
-Step 2: Python operation a[::-1] reverses the entire list
-Step 3: Reverse order: [position 0, position 1, position 2] becomes [position 2, position 1, position 0]
-Step 4: New mapping is [a[2], a[0], a[1]]
-Verification: Complete reversal applied correctly ✓
+Apply: Reverse the list
+Result: [a[2], a[0], a[1]]
 The answer is: [a[2], a[0], a[1]]
 
-**Example 3:**
-Input: Current state: [a[0], a[1], a[2], a[3], a[4]], Operation: a[:] = a[2:] + a[:2]
-Step 1: Current mapping is [a[0], a[1], a[2], a[3], a[4]]
-Step 2: Python operation a[:] = a[2:] + a[:2] rotates left by 2 positions
-Step 3: a[2:] = [a[2], a[3], a[4]] and a[:2] = [a[0], a[1]]
-Step 4: New mapping is [a[2], a[3], a[4], a[0], a[1]]
-Verification: Left rotation by 2 positions applied correctly ✓
-The answer is: [a[2], a[3], a[4], a[0], a[1]]
-
-**ERROR HANDLING:**
-- If operation syntax is unclear, output "PARSE_ERROR: [operation]" and explain issue
-- If indices would be out of bounds, output "INDEX_ERROR: [operation]" and skip
-- Always verify your result has the same number of elements as input
-
-**PYTHON OPERATION REFERENCE:**
-- a[i], a[j] = a[j], a[i] → Swap elements at positions i and j
+**KEY OPERATIONS:**
+- a[i], a[j] = a[j], a[i] → Swap positions i and j
 - a[::-1] → Reverse entire list
-- a[:] = a[k:] + a[:k] → Rotate left by k positions  
-- a[:] = a[-k:] + a[:-k] → Rotate right by k positions
-- a[i:j] = reversed(a[i:j]) → Reverse subrange from i to j-1
-- a[:] = a[::2] + a[1::2] → Even indices first, then odd indices
+- a[:] = a[k:] + a[:k] → Rotate left by k positions
 
 **INSTRUCTIONS:**
-- Always follow the 4-step template exactly
-- Include verification step to check your work
-- Always output in the format [a[i1], a[i2], a[i3], ...] where i1, i2, i3 are the original indices
-- Present the final answer in the format "The answer is: [a[i1], a[i2], a[i3], ...]"
-- Be precise with Python operation semantics"""
+- Only apply the given operation
+- Keep the exact format [a[i], a[j], a[k], ...]
+- Answer format: "The answer is: [a[i1], a[i2], ...]"""
 
-    manager_prompt = f"""You are a manager agent in a hierarchical Python list manipulation system combining results from {b} workers with verification.
+    manager_prompt = f"""You are a manager agent combining results from {b} workers.
 
-Your task is to determine the final index mapping after your workers processed their assigned Python operations in sequence.
+Task: Determine the final index mapping after workers processed operations in sequence.
 
-**CHAIN-OF-THOUGHT PROCESS:**
-1. Verify each worker's result format and validity
-2. Understand the sequential processing order
-3. Identify the final cumulative state
-4. Validate the result makes logical sense
-5. Output in exact required format
+**PROCESS:**
+1. Workers processed operations sequentially (worker 1 → worker 2 → ... → worker {b})
+2. The LAST worker's result is the final answer
+3. Report the last worker's index mapping
 
-CRITICAL: Use this EXACT template format for your response:
-
-**Example:**
-Input: Worker results: ["[a[1], a[0], a[2]]", "[a[2], a[0], a[1]]"]
-Step 1: I have {b} worker results processed sequentially
-Step 2: Worker 1 result: [a[1], a[0], a[2]] - valid format ✓
-Step 3: Worker 2 result: [a[2], a[0], a[1]] - valid format ✓  
-Step 4: The final worker's result [a[2], a[0], a[1]] represents the cumulative effect of all operations
-Verification: All workers completed successfully, final state is well-formed ✓
+**EXAMPLE:**
+Worker results: ["[a[1], a[0], a[2]]", "[a[2], a[0], a[1]]"]
+Worker 1 applied operation 1: [a[1], a[0], a[2]]
+Worker 2 applied operation 2: [a[2], a[0], a[1]]
+Final result from last worker: [a[2], a[0], a[1]]
 The answer is: [a[2], a[0], a[1]]
 
-**ERROR HANDLING:**
-- If any worker result is malformed, output "WORKER_ERROR: [worker_id] - [issue]"
-- If worker results are inconsistent, output "CONSISTENCY_ERROR: [explanation]"
-- If final result has wrong number of elements, output "SIZE_ERROR: [explanation]"
-
-**VALIDATION CHECKS:**
-- All worker results must have valid format [a[i1], a[i2], ...]
-- Final result must have same number of elements as expected
-- All indices must be valid (0 to n-1 for n elements)
-- Sequential processing order must be respected
-
 **INSTRUCTIONS:**
-- Workers processed Python operations sequentially (worker 1 → worker 2 → ... → worker {b})
-- The LAST worker's index mapping represents the final state after all operations
-- Always follow the verification template exactly
-- Include validation checks before final answer
-- Present the final answer in the format "The answer is: [a[i1], a[i2], a[i3], ...]" exactly as reported by the last worker
-- Be precise about which worker provided the final result"""
+- Take the last worker's result as final answer
+- Format: "The answer is: [a[i1], a[i2], ...]"
+- Report exactly what the last worker output"""
 
     return worker_prompt, manager_prompt
 
@@ -1047,19 +993,49 @@ def _validate_index_mapping_format(mapping_str: str) -> bool:
 
 def parse_index_mapping(mapping_str: str) -> List[int]:
     """
-    Parse index mapping string to list of indices.
+    Parse index mapping string to list of indices with improved robustness.
     
     Args:
         mapping_str: String like "[a[2], a[0], a[1]]"
         
     Returns:
-        List[int]: List of original indices [2, 0, 1]
+        List[int]: List of original indices [2, 0, 1] or None if parsing fails
     """
+    if not mapping_str:
+        return None
+        
     try:
-        # Extract numbers from the pattern [a[i], a[j], a[k], ...]
+        # First try the standard pattern [a[i], a[j], a[k], ...]
         indices = re.findall(r'a\[(\d+)\]', mapping_str)
-        return [int(idx) for idx in indices]
-    except:
+        if indices:
+            return [int(idx) for idx in indices]
+        
+        # Try alternative patterns that models might use
+        # Pattern: [2, 0, 1] or (2, 0, 1)
+        numbers = re.findall(r'[\[\(](\d+(?:,\s*\d+)*)[\]\)]', mapping_str)
+        if numbers:
+            return [int(x.strip()) for x in numbers[0].split(',')]
+            
+        # Pattern: index 2, index 0, index 1
+        index_nums = re.findall(r'index\s+(\d+)', mapping_str, re.IGNORECASE)
+        if index_nums:
+            return [int(idx) for idx in index_nums]
+            
+        # Pattern: position 2, position 0, position 1  
+        pos_nums = re.findall(r'position\s+(\d+)', mapping_str, re.IGNORECASE)
+        if pos_nums:
+            return [int(idx) for idx in pos_nums]
+            
+        # Pattern: just numbers separated by commas/spaces
+        clean_str = re.sub(r'[^\d,\s]', '', mapping_str)
+        if clean_str.strip():
+            numbers = re.findall(r'\d+', clean_str)
+            if numbers:
+                return [int(idx) for idx in numbers]
+                
+        return None
+        
+    except Exception as e:
         return None
 
 def evaluate_list_manipulation_accuracy(predicted_mapping: List[int], true_list: List[int], original_list: List[int]) -> tuple[bool, float, str]:
