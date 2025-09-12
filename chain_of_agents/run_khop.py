@@ -18,11 +18,12 @@ def main():
     parser.add_argument("--model_type", type=str, default="meta-llama/Llama-3.3-70B-Instruct-Turbo", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
     parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
-    parser.add_argument("--min_hops", type=int, default=7, help="Minimum number of hops")
-    parser.add_argument("--max_hops", type=int, default=10, help="Maximum number of hops") 
+    parser.add_argument("--min_hops", type=int, default=20, help="Minimum number of hops")
+    parser.add_argument("--max_hops", type=int, default=20, help="Maximum number of hops") 
     parser.add_argument("--num_facts", type=int, default=100, help="Number of facts to include in each problem")
     parser.add_argument("--facts_per_worker", type=int, default=20, help="Number of facts per worker (for IterativeQueryAgents)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--step", type=int, default=2, help="Step size for hops")
     args = parser.parse_args()
 
     # Create a nice table showing all arguments
@@ -71,7 +72,7 @@ def main():
     logger.info(f"Using {len(entities)} entities and {len(relations)} relations")
 
     # Run experiments for different numbers of hops
-    for num_hops in range(args.min_hops, args.max_hops + 1):
+    for num_hops in range(args.min_hops, args.max_hops + 1, args.step):
         accuracy_results = []
         token_stats = []
         
