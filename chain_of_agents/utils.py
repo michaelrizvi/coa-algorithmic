@@ -672,3 +672,507 @@ Reasoning: John's boss is Mary → Mary's supervisor is Tom
 Answer: Tom
 
 Be systematic and double-check your reasoning chain."""
+
+
+# List manipulation task utilities
+
+def generate_list_manipulation_operations(num_ops: int = 7) -> List[str]:
+    """
+    Generate the list of available operations ordered by difficulty.
+    
+    Args:
+        num_ops: Number of operations to include (1-7, ordered by difficulty)
+        
+    Returns:
+        List[str]: List of operation names in order of difficulty
+    """
+    all_operations = [
+        "swap",           # 1. Swap(k, j) - simplest
+        "reverse",        # 2. Reverse - simple  
+        "rotate_left",    # 3. Rotate left by k
+        "rotate_right",   # 4. Rotate right by k
+        "reverse_subrange", # 5. Reverse subrange
+        "even_odd_indices", # 6. Even then odd indices
+        "index_select"    # 7. Index-based selection - most complex
+    ]
+    return all_operations[:num_ops]
+
+def apply_list_operation(lst: List[int], operation: str, **kwargs) -> List[int]:
+    """
+    Apply a single list manipulation operation.
+    
+    Args:
+        lst: Input list
+        operation: Operation name
+        **kwargs: Operation parameters
+        
+    Returns:
+        List[int]: Resulting list after operation
+    """
+    result = lst.copy()
+    
+    if operation == "swap":
+        k, j = kwargs['k'], kwargs['j']
+        result[k], result[j] = result[j], result[k]
+    
+    elif operation == "reverse":
+        result = result[::-1]
+    
+    elif operation == "rotate_left":
+        k = kwargs['k']
+        result = result[k:] + result[:k]
+    
+    elif operation == "rotate_right":
+        k = kwargs['k']
+        result = result[-k:] + result[:-k]
+    
+    elif operation == "reverse_subrange":
+        i, j = kwargs['i'], kwargs['j']
+        result[i:j] = reversed(result[i:j])
+    
+    elif operation == "even_odd_indices":
+        result = result[::2] + result[1::2]
+    
+    elif operation == "index_select":
+        indices = kwargs['indices']
+        result = [result[i] for i in indices]
+    
+    return result
+
+def generate_operation_with_params(lst_size: int, operation: str, use_python_code: bool = False) -> tuple[str, dict]:
+    """
+    Generate a random operation with valid parameters.
+    
+    Args:
+        lst_size: Size of the list
+        operation: Operation name
+        use_python_code: If True, return Python code strings; if False, natural language
+        
+    Returns:
+        tuple[str, dict]: (operation_description, parameters)
+    """
+    if operation == "swap":
+        k, j = random.sample(range(lst_size), 2)
+        params = {'k': k, 'j': j}
+        if use_python_code:
+            desc = f"a[{k}], a[{j}] = a[{j}], a[{k}]"
+        else:
+            desc = f"Swap elements at positions {k} and {j}"
+        
+    elif operation == "reverse":
+        params = {}
+        if use_python_code:
+            desc = "a[::-1]"
+        else:
+            desc = "Reverse the entire list"
+        
+    elif operation == "rotate_left":
+        k = random.randint(1, lst_size - 1)
+        params = {'k': k}
+        if use_python_code:
+            desc = f"a[:] = a[{k}:] + a[:{k}]"
+        else:
+            desc = f"Rotate left by {k} positions"
+        
+    elif operation == "rotate_right":
+        k = random.randint(1, lst_size - 1)
+        params = {'k': k}
+        if use_python_code:
+            desc = f"a[:] = a[-{k}:] + a[:-{k}]"
+        else:
+            desc = f"Rotate right by {k} positions"
+        
+    elif operation == "reverse_subrange":
+        i = random.randint(0, lst_size - 2)
+        j = random.randint(i + 1, lst_size)
+        params = {'i': i, 'j': j}
+        if use_python_code:
+            desc = f"a[{i}:{j}] = reversed(a[{i}:{j}])"
+        else:
+            desc = f"Reverse subrange from index {i} to {j-1}"
+        
+    elif operation == "even_odd_indices":
+        params = {}
+        if use_python_code:
+            desc = "a[:] = a[::2] + a[1::2]"
+        else:
+            desc = "Rearrange to even indices first, then odd indices"
+        
+    elif operation == "index_select":
+        indices = list(range(lst_size))
+        random.shuffle(indices)
+        params = {'indices': indices}
+        if use_python_code:
+            indices_str = ', '.join(str(i) for i in indices)
+            desc = f"a = [a[{indices_str}]]"
+        else:
+            desc = f"Reorder using index pattern {indices}"
+    
+    return desc, params
+
+def generate_list_manipulation_problem(n: int = 5, num_ops: int = None, max_operation_types: int = 7, use_python_code: bool = False) -> tuple[str, List[int]]:
+    """
+    Generate a list manipulation problem.
+    
+    Args:
+        n: Size of the list
+        num_ops: Number of operations to perform. If None, uses random number
+        max_operation_types: Maximum number of operation types to use (1-7)
+        use_python_code: If True, use Python code strings; if False, natural language
+        
+    Returns:
+        tuple[str, List[int]]: (problem_description, final_list)
+    """
+    if num_ops is None:
+        num_ops = random.randint(max(1, n//2), 2*n)
+    
+    # Initialize list: [1, 2, 3, 4, 5] for n=5
+    initial_list = list(range(1, n+1))
+    current_list = initial_list.copy()
+    
+    # Get available operations based on difficulty limit
+    available_operations = generate_list_manipulation_operations(max_operation_types)
+    
+    # Generate random operations
+    operations = []
+    for _ in range(num_ops):
+        operation = random.choice(available_operations)
+        desc, params = generate_operation_with_params(len(current_list), operation, use_python_code)
+        operations.append((desc, operation, params))
+        
+        # Apply operation to track actual result
+        current_list = apply_list_operation(current_list, operation, **params)
+    
+    # Generate problem description with separator tokens
+    problem_parts = []
+    for i, (desc, _, _) in enumerate(operations):
+        problem_parts.append(desc)
+        if i < len(operations) - 1:  # Add separator except after last operation
+            problem_parts.append("|")
+    
+    problem_description = " ".join(problem_parts)
+    
+    return problem_description, current_list
+
+def get_list_manipulation_prompts(b: int = 2) -> tuple[str, str]:
+    """
+    Get the system prompts for list manipulation worker and manager agents.
+    
+    Args:
+        b: Branching factor for hierarchical processing
+        
+    Returns:
+        tuple[str, str]: (worker_prompt, manager_prompt)
+    """
+    worker_prompt = """You are a worker agent in a hierarchical system processing ONE Python list manipulation operation with step-by-step verification.
+
+Your task is to apply exactly one Python operation and report the resulting index mapping with perfect accuracy.
+
+You will receive:
+- Current list state as index mapping (e.g., [a[2], a[0], a[1]] meaning position 0 has original element 2, position 1 has original element 0, etc.)
+- ONE Python operation (e.g., a[0], a[2] = a[2], a[0] or a[::-1])
+
+**CHAIN-OF-THOUGHT PROCESS:**
+1. Parse the Python operation syntax carefully
+2. Understand the current state mapping
+3. Apply the operation step-by-step
+4. Verify the result makes sense
+5. Output in exact required format
+
+CRITICAL: Use this EXACT template format for your response:
+
+**Example 1:**
+Input: Current state: [a[0], a[1], a[2]], Operation: a[0], a[2] = a[2], a[0]
+Step 1: Current mapping is [a[0], a[1], a[2]]
+Step 2: Python operation a[0], a[2] = a[2], a[0] swaps elements at positions 0 and 2
+Step 3: Element at position 0 (a[0]) exchanges with element at position 2 (a[2])
+Step 4: New mapping is [a[2], a[1], a[0]]
+Verification: Swapped positions 0 and 2, position 1 unchanged ✓
+The answer is: [a[2], a[1], a[0]]
+
+**Example 2:**
+Input: Current state: [a[1], a[0], a[2]], Operation: a[::-1]
+Step 1: Current mapping is [a[1], a[0], a[2]]
+Step 2: Python operation a[::-1] reverses the entire list
+Step 3: Reverse order: [position 0, position 1, position 2] becomes [position 2, position 1, position 0]
+Step 4: New mapping is [a[2], a[0], a[1]]
+Verification: Complete reversal applied correctly ✓
+The answer is: [a[2], a[0], a[1]]
+
+**Example 3:**
+Input: Current state: [a[0], a[1], a[2], a[3], a[4]], Operation: a[:] = a[2:] + a[:2]
+Step 1: Current mapping is [a[0], a[1], a[2], a[3], a[4]]
+Step 2: Python operation a[:] = a[2:] + a[:2] rotates left by 2 positions
+Step 3: a[2:] = [a[2], a[3], a[4]] and a[:2] = [a[0], a[1]]
+Step 4: New mapping is [a[2], a[3], a[4], a[0], a[1]]
+Verification: Left rotation by 2 positions applied correctly ✓
+The answer is: [a[2], a[3], a[4], a[0], a[1]]
+
+**ERROR HANDLING:**
+- If operation syntax is unclear, output "PARSE_ERROR: [operation]" and explain issue
+- If indices would be out of bounds, output "INDEX_ERROR: [operation]" and skip
+- Always verify your result has the same number of elements as input
+
+**PYTHON OPERATION REFERENCE:**
+- a[i], a[j] = a[j], a[i] → Swap elements at positions i and j
+- a[::-1] → Reverse entire list
+- a[:] = a[k:] + a[:k] → Rotate left by k positions  
+- a[:] = a[-k:] + a[:-k] → Rotate right by k positions
+- a[i:j] = reversed(a[i:j]) → Reverse subrange from i to j-1
+- a[:] = a[::2] + a[1::2] → Even indices first, then odd indices
+
+**INSTRUCTIONS:**
+- Always follow the 4-step template exactly
+- Include verification step to check your work
+- Always output in the format [a[i1], a[i2], a[i3], ...] where i1, i2, i3 are the original indices
+- Present the final answer in the format "The answer is: [a[i1], a[i2], a[i3], ...]"
+- Be precise with Python operation semantics"""
+
+    manager_prompt = f"""You are a manager agent in a hierarchical Python list manipulation system combining results from {b} workers with verification.
+
+Your task is to determine the final index mapping after your workers processed their assigned Python operations in sequence.
+
+**CHAIN-OF-THOUGHT PROCESS:**
+1. Verify each worker's result format and validity
+2. Understand the sequential processing order
+3. Identify the final cumulative state
+4. Validate the result makes logical sense
+5. Output in exact required format
+
+CRITICAL: Use this EXACT template format for your response:
+
+**Example:**
+Input: Worker results: ["[a[1], a[0], a[2]]", "[a[2], a[0], a[1]]"]
+Step 1: I have {b} worker results processed sequentially
+Step 2: Worker 1 result: [a[1], a[0], a[2]] - valid format ✓
+Step 3: Worker 2 result: [a[2], a[0], a[1]] - valid format ✓  
+Step 4: The final worker's result [a[2], a[0], a[1]] represents the cumulative effect of all operations
+Verification: All workers completed successfully, final state is well-formed ✓
+The answer is: [a[2], a[0], a[1]]
+
+**ERROR HANDLING:**
+- If any worker result is malformed, output "WORKER_ERROR: [worker_id] - [issue]"
+- If worker results are inconsistent, output "CONSISTENCY_ERROR: [explanation]"
+- If final result has wrong number of elements, output "SIZE_ERROR: [explanation]"
+
+**VALIDATION CHECKS:**
+- All worker results must have valid format [a[i1], a[i2], ...]
+- Final result must have same number of elements as expected
+- All indices must be valid (0 to n-1 for n elements)
+- Sequential processing order must be respected
+
+**INSTRUCTIONS:**
+- Workers processed Python operations sequentially (worker 1 → worker 2 → ... → worker {b})
+- The LAST worker's index mapping represents the final state after all operations
+- Always follow the verification template exactly
+- Include validation checks before final answer
+- Present the final answer in the format "The answer is: [a[i1], a[i2], a[i3], ...]" exactly as reported by the last worker
+- Be precise about which worker provided the final result"""
+
+    return worker_prompt, manager_prompt
+
+def extract_index_mapping(text: str) -> str:
+    """
+    Extract index mapping from agent response text with enhanced error detection.
+    
+    Args:
+        text: Agent response text containing index mapping
+        
+    Returns:
+        str: Extracted mapping string, or None if not found
+    """
+    # Check for explicit error messages first
+    error_patterns = [
+        r"PARSE_ERROR:\s*(.+)",
+        r"INDEX_ERROR:\s*(.+)", 
+        r"WORKER_ERROR:\s*(.+)",
+        r"CONSISTENCY_ERROR:\s*(.+)",
+        r"SIZE_ERROR:\s*(.+)"
+    ]
+    
+    for pattern in error_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            # Found an error message, return None to indicate parsing failure
+            return None
+    
+    # Look for primary pattern in the text - match [a[...], a[...], ...]
+    match = re.search(r"The answer is:?\s*(\[(?:a\[\d+\](?:,\s*)?)+\])", text, re.IGNORECASE)
+    if match:
+        result = match.group(1).strip()
+        # Validate the extracted pattern
+        if _validate_index_mapping_format(result):
+            return result
+    
+    # Fallback: look for any index mapping pattern
+    match = re.search(r"\[(?:a\[\d+\](?:,\s*)?)+\]", text)
+    if match:
+        result = match.group(0).strip()
+        if _validate_index_mapping_format(result):
+            return result
+    
+    # Check if response contains partial or malformed patterns
+    if re.search(r"a\[\d+\]", text):
+        # Contains index notation but not properly formatted
+        return None
+    
+    return None
+
+def _validate_index_mapping_format(mapping_str: str) -> bool:
+    """
+    Validate that the index mapping string has correct format.
+    
+    Args:
+        mapping_str: String like "[a[2], a[0], a[1]]"
+        
+    Returns:
+        bool: True if format is valid
+    """
+    try:
+        # Check basic structure
+        if not (mapping_str.startswith('[') and mapping_str.endswith(']')):
+            return False
+        
+        # Extract all indices
+        indices = re.findall(r'a\[(\d+)\]', mapping_str)
+        if not indices:
+            return False
+        
+        # Check that indices are valid integers
+        for idx_str in indices:
+            int(idx_str)  # Will raise ValueError if invalid
+        
+        return True
+    except:
+        return False
+
+def parse_index_mapping(mapping_str: str) -> List[int]:
+    """
+    Parse index mapping string to list of indices.
+    
+    Args:
+        mapping_str: String like "[a[2], a[0], a[1]]"
+        
+    Returns:
+        List[int]: List of original indices [2, 0, 1]
+    """
+    try:
+        # Extract numbers from the pattern [a[i], a[j], a[k], ...]
+        indices = re.findall(r'a\[(\d+)\]', mapping_str)
+        return [int(idx) for idx in indices]
+    except:
+        return None
+
+def evaluate_list_manipulation_accuracy(predicted_mapping: List[int], true_list: List[int], original_list: List[int]) -> tuple[bool, float, str]:
+    """
+    Evaluate list manipulation prediction accuracy with detailed error categorization.
+    
+    Args:
+        predicted_mapping: List of predicted original indices
+        true_list: True final list after operations  
+        original_list: Original list [1, 2, 3, 4, 5]
+        
+    Returns:
+        tuple[bool, float, str]: (exact_match, element_accuracy, error_type)
+    """
+    if predicted_mapping is None:
+        return False, 0.0, "PARSING_FAILURE"
+    
+    if len(predicted_mapping) != len(true_list):
+        return False, 0.0, "SIZE_MISMATCH"
+    
+    # Check for invalid indices
+    max_index = len(original_list) - 1
+    for idx in predicted_mapping:
+        if not isinstance(idx, int) or idx < 0 or idx > max_index:
+            return False, 0.0, "INVALID_INDICES"
+    
+    # Convert predicted mapping to actual list
+    try:
+        predicted_list = [original_list[i] for i in predicted_mapping]
+    except (IndexError, TypeError):
+        return False, 0.0, "INDEX_ERROR"
+    
+    # Check exact match
+    exact_match = predicted_list == true_list
+    
+    # Calculate element-wise accuracy
+    correct_elements = sum(1 for p, t in zip(predicted_list, true_list) if p == t)
+    element_accuracy = correct_elements / len(true_list) if len(true_list) > 0 else 0.0
+    
+    if exact_match:
+        error_type = "NONE"
+    elif element_accuracy > 0.0:
+        error_type = "PARTIAL_CORRECT"
+    else:
+        error_type = "COMPLETELY_WRONG"
+    
+    return exact_match, element_accuracy, error_type
+
+def analyze_error_patterns(error_type_counts: dict, total_runs: int) -> dict:
+    """
+    Analyze error patterns and calculate error rates.
+    
+    Args:
+        error_type_counts: Dictionary mapping error types to counts
+        total_runs: Total number of runs
+        
+    Returns:
+        dict: Analysis of error patterns
+    """
+    analysis = {
+        "total_runs": total_runs,
+        "error_rates": {},
+        "most_common_error": None,
+        "success_rate": 0.0
+    }
+    
+    success_count = error_type_counts.get("NONE", 0)
+    analysis["success_rate"] = success_count / total_runs if total_runs > 0 else 0.0
+    
+    for error_type, count in error_type_counts.items():
+        analysis["error_rates"][error_type] = count / total_runs if total_runs > 0 else 0.0
+    
+    # Find most common error (excluding NONE)
+    error_only = {k: v for k, v in error_type_counts.items() if k != "NONE"}
+    if error_only:
+        analysis["most_common_error"] = max(error_only.items(), key=lambda x: x[1])
+    
+    return analysis
+
+def validate_intermediate_steps(predicted_mapping: List[int], expected_size: int) -> dict:
+    """
+    Validate intermediate steps in the prediction process.
+    
+    Args:
+        predicted_mapping: The predicted index mapping
+        expected_size: Expected size of the mapping
+        
+    Returns:
+        dict: Validation results
+    """
+    validation = {
+        "size_correct": False,
+        "indices_valid": False,
+        "has_duplicates": False,
+        "missing_indices": [],
+        "duplicate_indices": [],
+        "out_of_bounds": []
+    }
+    
+    if predicted_mapping is None:
+        return validation
+    
+    # Check size
+    validation["size_correct"] = len(predicted_mapping) == expected_size
+    
+    # Check for valid indices
+    expected_indices = set(range(expected_size))
+    actual_indices = set(predicted_mapping)
+    
+    validation["indices_valid"] = all(0 <= idx < expected_size for idx in predicted_mapping)
+    validation["missing_indices"] = list(expected_indices - actual_indices)
+    validation["duplicate_indices"] = [idx for idx in predicted_mapping if predicted_mapping.count(idx) > 1]
+    validation["has_duplicates"] = len(validation["duplicate_indices"]) > 0
+    validation["out_of_bounds"] = [idx for idx in predicted_mapping if idx < 0 or idx >= expected_size]
+    
+    return validation

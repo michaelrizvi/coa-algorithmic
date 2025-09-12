@@ -13,12 +13,12 @@ import tabulate
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct", help="Model type to use for agents")
+    parser.add_argument("--model_type", type=str, default="openai/gpt-oss-20b", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
     parser.add_argument("--num_runs", type=int, default=2, help="Number of runs to perform")
     parser.add_argument("--seq_length", type=int, default=32, help="Fixed sequence length for input")
     parser.add_argument("--min_branching_factor", type=int, default=2, help="Minimum branching factor")
-    parser.add_argument("--max_branching_factor", type=int, default=4, help="Maximum branching factor")
+    parser.add_argument("--max_branching_factor", type=int, default=2, help="Maximum branching factor")
     parser.add_argument("--step", type=int, default=2, help="Step size for branching factor")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--index_hints", type=bool, default=False, help="Use index hints for the agents")

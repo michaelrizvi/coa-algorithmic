@@ -7,7 +7,7 @@ class WandbHandler(logging.Handler):
         log_entry = self.format(record)
         wandb.log({"log": log_entry})
 
-def setup_logger(name="my_logger"):
+def setup_logger(name="my_logger", enable_wandb=True):
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
 
@@ -17,9 +17,10 @@ def setup_logger(name="my_logger"):
         console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
 
-        # Wandb handler
-        wandb_handler = WandbHandler()
-        wandb_handler.setLevel(logging.INFO)
-        logger.addHandler(wandb_handler)
+        # Wandb handler (only if enabled)
+        if enable_wandb:
+            wandb_handler = WandbHandler()
+            wandb_handler.setLevel(logging.INFO)
+            logger.addHandler(wandb_handler)
 
     return logger

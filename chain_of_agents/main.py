@@ -1,4 +1,4 @@
-from typing import Optional, Iterator, Dict
+from typing import Optional, Iterator, Dict, List
 from agents import WorkerAgent, ManagerAgent
 from utils import *
 import logging
@@ -67,6 +67,27 @@ class ChainOfAgents:
             chunks.append(chunk)
         
         return chunks
+
+    def _split_operations_into_chunks(self, operations_sequence: str, chunk_size: int) -> List[str]:
+        """
+        Split operations sequence into chunks by number of operations.
+        
+        Args:
+            operations_sequence: String with operations separated by " | "
+            chunk_size: Number of operations per chunk
+            
+        Returns:
+            List[str]: List of chunks, each containing up to chunk_size operations
+        """
+        operations = operations_sequence.split(" | ")
+        chunks = []
+        
+        for i in range(0, len(operations), chunk_size):
+            chunk_operations = operations[i:i + chunk_size]
+            chunk = " | ".join(chunk_operations)
+            chunks.append(chunk)
+        
+        return chunks
     
     def process(self, input_text: str, query: str, extraction_func = None ) -> Dict:
         """
@@ -84,6 +105,8 @@ class ChainOfAgents:
             chunks = split_binary_string(input_text, self.chunk_size)
         elif "Swap ball" in input_text:  # Permutation problem
             chunks = self._split_swaps_into_chunks(input_text, self.chunk_size)
+        elif any(op in input_text for op in ["Swap elements", "Reverse", "Rotate", "a[", "a:"]):  # List manipulation
+            chunks = self._split_operations_into_chunks(input_text, self.chunk_size)
         else:
             chunks = split_into_chunks(input_text, self.chunk_size)
         # Process chunks with worker agents
@@ -100,6 +123,10 @@ class ChainOfAgents:
             ball_numbers = re.findall(r'ball (\d+)', input_text)
             max_ball = max(int(num) for num in ball_numbers) if ball_numbers else 5
             current_positions = {i: i for i in range(1, max_ball + 1)}
+        # Initialize state for list manipulation problems
+        elif any(op in input_text for op in ["Swap elements", "Reverse", "Rotate", "a[", "a:"]):
+            list_size = 5  # Default size, could be made configurable
+            current_mapping = f"[{', '.join(f'a[{i}]' for i in range(list_size))}]"
         
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
@@ -109,6 +136,10 @@ class ChainOfAgents:
             # For permutation problems, include current state
             if "Swap ball" in input_text and current_positions:
                 chunk_with_state = f"Current positions: {current_positions}\nSwap operations: {chunk}"
+                response = worker.process_chunk(chunk_with_state, query)
+            # For list manipulation problems, include current mapping
+            elif any(op in input_text for op in ["Swap elements", "Reverse", "Rotate", "a[", "a:"]):
+                chunk_with_state = f"Current state: {current_mapping}\nOperations: {chunk}"
                 response = worker.process_chunk(chunk_with_state, query)
             else:
                 response = worker.process_chunk(chunk, query)
@@ -121,6 +152,9 @@ class ChainOfAgents:
                     parsed_positions = parse_position_dict(output)
                     if parsed_positions:
                         current_positions = parsed_positions
+                # Update current mapping for list manipulation
+                elif any(op in input_text for op in ["Swap elements", "Reverse", "Rotate", "a[", "a:"]) and output:
+                    current_mapping = output if output else current_mapping
             worker_outputs.append(output)
 
             worker_token_usages.append(response["usage"].completion_tokens)
@@ -311,7 +345,8 @@ class IterativeQueryAgents:
         max_tokens_manager: int = 1024,
         worker_prompt: Optional[str] = None,
         manager_prompt: Optional[str] = None,
-        num_hops: int = 2
+        num_hops: int = 2,
+        nb_retries: int = 5
     ):
         """
         Initialize the Iterative Query Agents.
@@ -325,6 +360,7 @@ class IterativeQueryAgents:
             worker_prompt: Custom system prompt for workers
             manager_prompt: Custom system prompt for manager
             num_hops: Number of hops in the reasoning chain
+            nb_retries: Number of retries when all workers return "Not Found"
         """
         self.worker_model = worker_model
         self.manager_model = manager_model
@@ -332,6 +368,7 @@ class IterativeQueryAgents:
         self.max_tokens_worker = max_tokens_worker
         self.max_tokens_manager = max_tokens_manager
         self.num_hops = num_hops
+        self.nb_retries = nb_retries
         
         # Default prompts
         default_worker_prompt = """You are a helpful assistant that answers questions based ONLY on the given facts.
@@ -348,6 +385,7 @@ Instructions:
 - If the exact fact is NOT in your subset (which is very common), respond with "Not Found"
 - DO NOT guess or infer answers from similar facts
 - DO NOT make assumptions about relationships not explicitly stated
+- DOUBLE-CHECK: Before giving your final answer, carefully re-read the facts to ensure you have the correct match
 - Always format your response as: Answer: [YourAnswer]
 
 Example (found):
@@ -365,7 +403,13 @@ Facts: "John's boss is Mary. Alice's teacher is Bob."
 Query: "Who is Mary's supervisor?"  
 Response: Answer: Not Found
 
-Remember: Most queries will not have their answer in your subset of facts. Only answer if the exact fact is present."""
+CRITICAL: Before responding, double-check your work:
+1. Re-read the query to understand exactly what is being asked
+2. Scan through ALL the facts again to verify your answer or confirm it's not found
+3. Make sure the relationship type matches exactly (e.g., "boss" vs "supervisor")
+4. Only provide an answer if you are completely certain it appears in the facts
+
+Remember: Most queries will not have their answer in your subset of facts. Only answer if the exact fact is present and you have double-checked it."""
 
         default_manager_prompt = """You are a manager agent that coordinates multi-hop reasoning queries.
 
@@ -390,10 +434,14 @@ Response: Next Query: Who is Mary's supervisor?"""
         
         logger.info(f"Initialized Iterative Query Agents with {self.facts_per_worker} facts per worker, {self.num_hops} hops")
 
-    def _split_facts_into_chunks(self, facts_string: str) -> List[str]:
+    def _split_facts_into_chunks(self, facts_string: str, shuffle: bool = False) -> List[str]:
         """Split facts string into chunks for worker agents."""
         # Split facts by sentence (assuming facts are separated by ". ")
         facts_list = [fact.strip() for fact in facts_string.split(". ") if fact.strip()]
+        
+        # Shuffle facts if requested (for retry attempts)
+        if shuffle:
+            random.shuffle(facts_list)
         
         # Group facts into chunks
         chunks = []
@@ -487,33 +535,58 @@ Response: Next Query: Who is Mary's supervisor?"""
                 
             logger.info(f"Hop {hop_idx + 1}: {current_query}")
             
-            # Query all worker agents
-            worker_answers = []
-            hop_worker_tokens = []
-            hop_worker_prompt_tokens = []
-            
-            for i, chunk in enumerate(fact_chunks):
-                worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
-                response = worker.process_chunk(chunk, current_query)
-                
-                answer = self._extract_answer(response["content"])
-                worker_answers.append(answer)
-                
-                hop_worker_tokens.append(response["usage"].completion_tokens)
-                hop_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
-                
-                logger.info(f"Worker {i+1} answer: {answer}")
-                del worker
-            
-            # Find the first valid answer (not "Not Found")
+            # Query all worker agents with retry logic
             current_answer = ""
-            for answer in worker_answers:
-                if answer and answer.lower() != "not found":
-                    current_answer = answer
-                    break
+            retry_count = 0
+            all_hop_worker_tokens = []
+            all_hop_worker_prompt_tokens = []
+            
+            while not current_answer and retry_count < self.nb_retries:
+                logger.info(f"Hop {hop_idx + 1} attempt {retry_count + 1}/{self.nb_retries}")
+                
+                # Shuffle facts for retry attempts (except first attempt)
+                shuffle_facts = retry_count > 0
+                if shuffle_facts:
+                    fact_chunks = self._split_facts_into_chunks(input_text, shuffle=True)
+                    logger.info(f"Shuffled facts for retry attempt {retry_count + 1}")
+                
+                worker_answers = []
+                hop_worker_tokens = []
+                hop_worker_prompt_tokens = []
+                
+                for i, chunk in enumerate(fact_chunks):
+                    worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
+                    response = worker.process_chunk(chunk, current_query)
+                    
+                    answer = self._extract_answer(response["content"])
+                    worker_answers.append(answer)
+                    
+                    hop_worker_tokens.append(response["usage"].completion_tokens)
+                    hop_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
+                    
+                    logger.info(f"Worker {i+1} answer: {answer}")
+                    
+                    # Early stopping: if we found an answer, stop processing remaining chunks
+                    if answer and answer.lower() != "not found":
+                        current_answer = answer
+                        logger.info(f"Found answer early, stopping remaining workers for hop {hop_idx + 1}")
+                        del worker
+                        break
+                    
+                    del worker
+                
+                # Accumulate token usage across all retries
+                all_hop_worker_tokens.extend(hop_worker_tokens)
+                all_hop_worker_prompt_tokens.extend(hop_worker_prompt_tokens)
+                
+                # If no answer found in this attempt, prepare for next retry
+                if not current_answer:
+                    retry_count += 1
+                    if retry_count < self.nb_retries:
+                        logger.info(f"All workers returned 'Not Found', retrying hop {hop_idx + 1} (attempt {retry_count + 1}/{self.nb_retries})")
             
             if not current_answer:
-                logger.warning(f"No worker found answer for hop {hop_idx + 1}")
+                logger.warning(f"No worker found answer for hop {hop_idx + 1} after {self.nb_retries} retries")
                 return {
                     'content': "",
                     'token_usage': {
@@ -524,9 +597,9 @@ Response: Next Query: Who is Mary's supervisor?"""
                     }
                 }
             
-            # Update token tracking
-            total_worker_tokens += sum(hop_worker_tokens)
-            total_worker_prompt_tokens += sum(hop_worker_prompt_tokens)
+            # Update token tracking with all attempts
+            total_worker_tokens += sum(all_hop_worker_tokens)
+            total_worker_prompt_tokens += sum(all_hop_worker_prompt_tokens)
             
             logger.info(f"Found answer for hop {hop_idx + 1}: {current_answer}")
             
@@ -537,10 +610,11 @@ Response: Next Query: Who is Mary's supervisor?"""
                     final_answer = extraction_func(current_answer)
                 
                 # Calculate average token usage
-                avg_completion_tokens = total_worker_tokens / max(1, len(fact_chunks) * self.num_hops)
-                max_completion_tokens = max(hop_worker_tokens) if hop_worker_tokens else 0
-                avg_prompt_tokens = total_worker_prompt_tokens / max(1, len(fact_chunks) * self.num_hops)
-                max_prompt_tokens = max(hop_worker_prompt_tokens) if hop_worker_prompt_tokens else 0
+                total_worker_calls = len(all_hop_worker_tokens) if all_hop_worker_tokens else 1
+                avg_completion_tokens = total_worker_tokens / max(1, total_worker_calls)
+                max_completion_tokens = max(all_hop_worker_tokens) if all_hop_worker_tokens else 0
+                avg_prompt_tokens = total_worker_prompt_tokens / max(1, total_worker_calls)
+                max_prompt_tokens = max(all_hop_worker_prompt_tokens) if all_hop_worker_prompt_tokens else 0
                 
                 return {
                     'content': final_answer,
@@ -683,6 +757,194 @@ class PrefixSumAgents:
                 chunk = level_outputs[i:i+self.b]
                 
                 # Process chunk with manager agent (same for both permutation and binary)
+                output = manager.synthesize(chunk, query)
+                logging.info(f"Manager input: {chunk} -> {output['content']}")
+                
+                if extraction_func:
+                    synthesized = extraction_func(output["content"])
+                else:
+                    synthesized = output["content"]
+                    
+                next_level.append(synthesized)
+                
+                completion_tokens = output["usage"].completion_tokens
+                print("OUTPUT TOKEN COUNT: ", completion_tokens)
+                print("OUTPUT CHAR COUNT: ", len(output["content"]))
+                prompt_tokens = getattr(output["usage"], 'prompt_tokens', 0)
+                completion_token_usages.append(completion_tokens)
+                prompt_token_usages.append(prompt_tokens)
+                
+                # Collect individual agent token usage
+                all_completion_tokens.append(completion_tokens)
+                all_prompt_tokens.append(prompt_tokens)
+                
+                del manager
+                
+            # Accumulate token usage stats for this round
+            if completion_token_usages:
+                avg_completion_tokens = sum(completion_token_usages) / len(completion_token_usages)
+                max_completion_tokens = max(completion_token_usages)
+                sum_of_avg_completion_tokens += avg_completion_tokens
+                sum_of_max_completion_tokens += max_completion_tokens
+                
+            if prompt_token_usages:
+                avg_prompt_tokens = sum(prompt_token_usages) / len(prompt_token_usages)
+                max_prompt_tokens = max(prompt_token_usages)
+                sum_of_avg_prompt_tokens += avg_prompt_tokens
+                sum_of_max_prompt_tokens += max_prompt_tokens
+                
+            level_outputs = next_level
+            round_num += 1
+            
+        # Calculate individual agent token usage statistics
+        mean_completion_tokens = 0
+        max_completion_tokens_single = 0
+        mean_prompt_tokens = 0
+        max_prompt_tokens_single = 0
+        
+        if all_completion_tokens:
+            mean_completion_tokens = sum(all_completion_tokens) / len(all_completion_tokens)
+            max_completion_tokens_single = max(all_completion_tokens)
+            logger.info(f"Mean completion tokens per agent: {mean_completion_tokens:.2f}")
+            logger.info(f"Max completion tokens per agent: {max_completion_tokens_single}")
+            
+        if all_prompt_tokens:
+            mean_prompt_tokens = sum(all_prompt_tokens) / len(all_prompt_tokens)
+            max_prompt_tokens_single = max(all_prompt_tokens)
+            logger.info(f"Mean prompt tokens per agent: {mean_prompt_tokens:.2f}")
+            logger.info(f"Max prompt tokens per agent: {max_prompt_tokens_single}")
+
+        logging.info(f"Final output: {level_outputs[0]}")
+        
+        return {
+            'content': level_outputs[0],
+            'token_usage': {
+                'avg_completion_tokens': sum_of_avg_completion_tokens,
+                'max_completion_tokens': sum_of_max_completion_tokens,
+                'avg_prompt_tokens': sum_of_avg_prompt_tokens,
+                'max_prompt_tokens': sum_of_max_prompt_tokens,
+                'mean_completion_tokens_per_agent': mean_completion_tokens,
+                'max_completion_tokens_per_agent': max_completion_tokens_single,
+                'mean_prompt_tokens_per_agent': mean_prompt_tokens,
+                'max_prompt_tokens_per_agent': max_prompt_tokens_single
+            }
+        }
+
+
+class ListManipulationPrefixSumAgents:
+    """Class for implementing list manipulation using hierarchical agents."""
+    
+    def __init__(
+            self,
+            worker_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+            manager_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+            max_tokens_worker: int = 512,
+            max_tokens_manager: int = 1024,
+            worker_prompt: Optional[str] = None,
+            manager_prompt: Optional[str] = None,
+            branching_factor: int = 2  # Branching factor for hierarchical processing 
+            ):
+        from utils import get_list_manipulation_prompts
+        default_worker_prompt, default_manager_prompt = get_list_manipulation_prompts(b=branching_factor)
+        self.worker_model = worker_model
+        self.manager_model = manager_model 
+        self.max_tokens_worker = max_tokens_worker
+        self.max_tokens_manager = max_tokens_manager
+        self.worker_prompt = worker_prompt or default_worker_prompt
+        self.manager_prompt = manager_prompt or default_manager_prompt
+        self.b = branching_factor  # Branching factor for hierarchical processing
+
+    def _split_operations_into_chunks(self, operations_sequence: str, chunk_size: int) -> List[str]:
+        """
+        Split operations sequence into chunks by number of operations.
+        
+        Args:
+            operations_sequence: String with operations separated by " | "
+            chunk_size: Number of operations per chunk
+            
+        Returns:
+            List[str]: List of chunks, each containing up to chunk_size operations
+        """
+        operations = operations_sequence.split(" | ")
+        chunks = []
+        
+        for i in range(0, len(operations), chunk_size):
+            chunk_operations = operations[i:i + chunk_size]
+            chunk = " | ".join(chunk_operations)
+            chunks.append(chunk)
+        
+        return chunks
+
+    def hierarchical_process(self, input_text: str, query: str, extraction_func=None) -> Dict:
+        """
+        Hierarchical processing of list manipulation operations using b-ary tree agent structure.
+
+        Args:
+            input_text: String of list manipulation operations
+            query: Query for each agent
+            extraction_func: Optional function to extract/transform output at each step
+        
+        Returns:
+            Dict: Final synthesized output with token usage statistics
+        """
+        logging.info(f"Starting hierarchical_process with input: {input_text} and query: '{query}', branching factor: {self.b}")
+
+        # Parse operations and initialize with identity mapping
+        operations = input_text.split(" | ")
+        
+        # Extract list size from the first operation or use default
+        list_size = 5  # Default size
+        # Try to infer size from operations that mention positions
+        import re
+        for op in operations:
+            # Look for position numbers in operations
+            pos_matches = re.findall(r'positions? (\d+)', op)
+            if pos_matches:
+                max_pos = max(int(pos) for pos in pos_matches)
+                list_size = max(list_size, max_pos + 1)
+                break
+        
+        # Initialize with identity mapping [a[0], a[1], a[2], ...]
+        initial_mapping = f"[{', '.join(f'a[{i}]' for i in range(list_size))}]"
+        
+        # Process each operation individually with WorkerAgent
+        level_outputs = []
+        current_mapping = initial_mapping
+        for operation in operations:
+            worker = WorkerAgent(self.worker_model, self.worker_prompt, max_tokens=self.max_tokens_worker)
+            # Format input for worker: current mapping + single operation
+            worker_input = f"Current state: {current_mapping}\nOperation: {operation}"
+            response = worker.process_chunk(worker_input, query)
+            
+            if extraction_func:
+                extracted = extraction_func(response["content"])
+                current_mapping = extracted if extracted else current_mapping
+                level_outputs.append(extracted)
+            else:
+                level_outputs.append(response["content"])
+            del worker
+            
+        logging.info(f"Initial level outputs: {level_outputs}")
+    
+        round_num = 0
+        sum_of_max_completion_tokens = 0
+        sum_of_avg_completion_tokens = 0
+        sum_of_max_prompt_tokens = 0
+        sum_of_avg_prompt_tokens = 0
+        all_completion_tokens = []
+        all_prompt_tokens = []
+        
+        while len(level_outputs) > 1:
+            logging.info(f"Manager round {round_num} with {len(level_outputs)} inputs")
+            next_level = []
+            completion_token_usages = []
+            prompt_token_usages = []
+            
+            for i in range(0, len(level_outputs), self.b):
+                manager = ManagerAgent(self.manager_model, self.manager_prompt, max_tokens=self.max_tokens_manager)
+                chunk = level_outputs[i:i+self.b]
+                
+                # Process chunk with manager agent
                 output = manager.synthesize(chunk, query)
                 logging.info(f"Manager input: {chunk} -> {output['content']}")
                 
