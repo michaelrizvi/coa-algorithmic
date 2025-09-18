@@ -24,6 +24,8 @@ def main():
     parser.add_argument("--max_swaps", type=int, default=12, help="Maximum number of swaps")
     parser.add_argument("--seed", type=int, default=43, help="Random seed for reproducibility")
     parser.add_argument("--branching_factor", type=int, default=2, help="Branching factor for prefix sum agents")
+    parser.add_argument("--a5_only", type=lambda x: x.lower() == 'true', default=True, help="Constrain to A5 (even permutations only). Takes True or False.")
+    parser.add_argument("--step", type=int, default=2, help="Step size for number of swaps")
     args = parser.parse_args()
 
     # Create a nice table showing all arguments
@@ -45,12 +47,14 @@ def main():
         "PrefixSumAgents": "prefix-sum"
     }
     
+    a5_suffix = "_A5" if args.a5_only else ""
+    
     if args.agent_type == "MajorityVotingAgents":
-        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_agents{args.num_agents}_swaps{args.min_swaps}-{args.max_swaps}"
+        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_agents{args.num_agents}_swaps{args.min_swaps}-{args.max_swaps}{a5_suffix}"
     elif args.agent_type == "ChainOfAgents":
-        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_chunk{args.chunk_size}_swaps{args.min_swaps}-{args.max_swaps}"
+        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_chunk{args.chunk_size}_swaps{args.min_swaps}-{args.max_swaps}{a5_suffix}"
     elif args.agent_type == "PrefixSumAgents":
-        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_b{args.branching_factor}_swaps{args.min_swaps}-{args.max_swaps}"
+        run_name = f"{name_dict[args.agent_type]}_elements{args.num_elements}_b{args.branching_factor}_swaps{args.min_swaps}-{args.max_swaps}{a5_suffix}"
     
     wandb.init(project="coa-permutation-eval", config=vars(args), name=run_name, reinit=True)
     logger = setup_logger()
@@ -88,14 +92,14 @@ def main():
         )
 
     # Run experiments for different numbers of swaps
-    for num_swaps in range(args.min_swaps, args.max_swaps + 1):
+    for num_swaps in range(args.min_swaps, args.max_swaps + 1, args.step):
         exact_match_results = []
         element_accuracy_results = []
         token_stats = []
         
         for run_idx in range(args.num_runs):
             # Generate permutation problem
-            swap_sequence, true_positions = generate_permutation_problem(n=args.num_elements, num_swaps=num_swaps)
+            swap_sequence, true_positions = generate_permutation_problem(n=args.num_elements, num_swaps=num_swaps, a5_only=args.a5_only)
             
             query = "What is the final position of each ball after all swaps?"
             

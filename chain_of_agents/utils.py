@@ -496,9 +496,29 @@ def evaluate_permutation_accuracy(predicted_positions: dict, true_positions: lis
     
     return exact_match, element_accuracy
 
-def generate_permutation_problem(n: int = 5, num_swaps: int = None) -> tuple[str, List[int]]:
+def is_even_permutation(positions: List[int]) -> bool:
     """
-    Generate an Sn permutation problem in natural language.
+    Check if a permutation is even by counting inversions.
+    
+    A permutation is even if it can be expressed as a product of an even number
+    of transpositions. This is equivalent to having an even number of inversions.
+    
+    Args:
+        positions: List where positions[i] is the bin number where ball i+1 ends up
+        
+    Returns:
+        bool: True if the permutation is even (in A5), False if odd
+    """
+    inversions = 0
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            if positions[i] > positions[j]:
+                inversions += 1
+    return inversions % 2 == 0
+
+def generate_permutation_problem(n: int = 5, num_swaps: int = None, a5_only: bool = False) -> tuple[str, List[int]]:
+    """
+    Generate an Sn or An permutation problem in natural language.
     
     The problem starts with balls 1-n in bins 1-n respectively, then performs
     a series of swaps to create a permutation. Returns both the natural language
@@ -507,6 +527,7 @@ def generate_permutation_problem(n: int = 5, num_swaps: int = None) -> tuple[str
     Args:
         n: Number of elements in the permutation group (default 5 for S5)
         num_swaps: Number of swaps to perform. If None, uses random number between n//2 and 2*n
+        a5_only: If True, constrains to A5 (even permutations only). Forces even number of swaps.
         
     Returns:
         tuple[str, List[int]]: (problem_description, final_positions)
@@ -514,6 +535,10 @@ def generate_permutation_problem(n: int = 5, num_swaps: int = None) -> tuple[str
     """
     if num_swaps is None:
         num_swaps = random.randint(max(1, n//2), 2*n)
+    
+    # For A5 constraint, ensure even number of swaps
+    if a5_only and num_swaps % 2 == 1:
+        num_swaps += 1
     
     # Initialize positions: ball i is in bin i (1-indexed)
     positions = list(range(1, n+1))  # positions[i] = bin number for ball i+1
@@ -543,6 +568,10 @@ def generate_permutation_problem(n: int = 5, num_swaps: int = None) -> tuple[str
             problem_parts.append("|")
     
     problem_description = " ".join(problem_parts)
+    
+    # Verify A5 membership if constraint is enabled
+    if a5_only:
+        assert is_even_permutation(positions), f"Generated permutation is not in A5 (even): {positions}"
     
     return problem_description, positions
 
