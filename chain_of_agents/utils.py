@@ -335,25 +335,39 @@ def get_permutation_prefix_sum_prompts(b: int = 2) -> tuple[str, str]:
     """
     worker_prompt = """You are a worker agent in a hierarchical system processing ONE swap operation.
 
+IMPORTANT: Initially, balls start in their corresponding bins (ball 1 in bin 1, ball 2 in bin 2, etc.). Through swaps, balls can move to different bins.
+
 Your task is to apply exactly one swap operation and report the resulting ball positions with perfect accuracy.
 
 You will receive:
-- Current ball positions as a dictionary (e.g., {1:3, 2:1, 3:2})
+- Current ball positions as a dictionary (e.g., {1:3, 2:1, 3:2, 4:5, 5:4})
 - ONE swap operation: "Swap ball X and ball Y"
 
-Process the swap step-by-step:
-1. Identify ball X's current bin and ball Y's current bin from the dictionary
-2. Exchange ONLY these two positions:
-   - Ball X goes to the bin where ball Y was
-   - Ball Y goes to the bin where ball X was
-3. ALL other balls stay in their exact same positions
-4. Output the complete updated dictionary
+Process the swap step-by-step using this exact reasoning template:
+1. Current state: [copy the input dictionary]
+2. Operation: [copy the swap operation] 
+3. Ball X is currently in bin: [identify bin number]
+4. Ball Y is currently in bin: [identify bin number]
+5. After swap: Ball X moves to bin [Y's old bin], Ball Y moves to bin [X's old bin]
+6. Verification: Check that only these two balls changed positions, all others remain the same
+7. Final state: [complete updated dictionary]
 
-Example:
-- Input positions: {1:3, 2:1, 3:2}
-- Swap operation: "Swap ball 1 and ball 3"
-- Ball 1 is in bin 3, ball 3 is in bin 2
-- After swap: {1:2, 2:1, 3:3}
+CRITICAL CONCEPT: You are tracking which BALL is in which BIN. 
+- BALLS are the moving objects (numbered 1, 2, 3, 4, 5)
+- BINS are the fixed locations (numbered 1, 2, 3, 4, 5) 
+- When you swap "ball X and ball Y", you move those balls to different bins
+- The bins stay in place - only the balls move between them
+
+Example following the template (note: balls are NOT in initial positions):
+1. Current state: {1:3, 2:1, 3:2, 4:5, 5:4}
+2. Operation: Swap ball 1 and ball 3
+3. Ball 1 is currently in bin: 3
+4. Ball 3 is currently in bin: 2  
+5. After swap: Ball 1 moves to bin 2, Ball 3 moves to bin 3
+6. Verification: Only ball 1 and ball 3 changed positions. Ball 2 stays in bin 1, ball 4 stays in bin 5, ball 5 stays in bin 4.
+7. Final state: {1:2, 2:1, 3:3, 4:5, 5:4}
+
+Notice: Ball 1 was in bin 3 (not its initial bin 1), ball 3 was in bin 2 (not its initial bin 3). After swapping, ball 1 goes to bin 2, ball 3 goes to bin 3.
 
 CRITICAL: Include ALL balls from input with exact same ball numbers. One swap affects exactly two positions.
 
@@ -362,6 +376,8 @@ Present the final answer in the format "The answer is: {ball1:bin1, ball2:bin2, 
 
     manager_prompt = f"""You are a manager agent in a hierarchical ball-tracking system combining results from {b} workers.
 
+IMPORTANT: Initially, balls start in their corresponding bins (ball 1 in bin 1, ball 2 in bin 2, etc.). Through swaps, balls move to different bins.
+
 Your task is to determine the final ball positions after your workers processed their assigned swaps in sequence.
 
 You will receive position dictionaries from {b} workers who processed swaps in chronological order. Each worker:
@@ -369,14 +385,24 @@ You will receive position dictionaries from {b} workers who processed swaps in c
 - Applied exactly one swap operation
 - Reported the updated positions
 
-Your job is simple:
-1. The workers processed swaps sequentially (worker 1 → worker 2 → ... → worker {b})
-2. The LAST worker's position dictionary represents the final state after all {b} swaps
-3. Report the last worker's result as your output
+Your job requires careful validation and explicit reasoning:
+1. Validate that each worker's result is a logical continuation of the previous worker's output
+2. Show the complete sequence of states from initial to final
+3. Verify that each step represents exactly one swap operation
+4. Report the last worker's result as your final output
 
-Example with 2 workers:
-- Worker 1 result: {{1:2, 2:3, 3:1}} (after 1st swap)
-- Worker 2 result: {{1:3, 2:2, 3:1}} (after 2nd swap) ← This is your answer
+Use this reasoning template:
+1. Initial state: [first worker's input state]
+2. After worker 1: [worker 1's result] - validate this is one swap from initial
+3. After worker 2: [worker 2's result] - validate this is one swap from worker 1's result
+[Continue for all workers...]
+4. Final result: [last worker's result]
+
+Example with 2 workers following the template:
+1. Initial state: {{1:1, 2:2, 3:3, 4:4, 5:5}} (balls start in corresponding bins)
+2. After worker 1: {{1:2, 2:3, 3:1, 4:5, 5:4}} - valid: exactly 2 positions changed
+3. After worker 2: {{1:3, 2:2, 3:1, 4:4, 5:5}} - valid: exactly 2 positions changed from worker 1's result  
+4. Final result: {{1:3, 2:2, 3:1, 4:4, 5:5}}
 
 CRITICAL: Output exactly the position dictionary from the final (last) worker. This contains the cumulative effect of all swaps.
 
