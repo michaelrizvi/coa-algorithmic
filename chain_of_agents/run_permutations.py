@@ -18,12 +18,12 @@ def main():
     parser.add_argument("--model_type", type=str, default="lgai/exaone-3-5-32b-instruct", help="Model type to use for agents")
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens for each agent")
     parser.add_argument("--chunk_size", type=int, default=2, help="Chunk size for Chain of Agents (number of swaps)")
-    parser.add_argument("--num_runs", type=int, default=5, help="Number of runs to perform")
+    parser.add_argument("--num_runs", type=int, default=2, help="Number of runs to perform")
     parser.add_argument("--num_elements", type=int, default=5, help="Number of elements in permutation")
-    parser.add_argument("--min_swaps", type=int, default=20, help="Minimum number of swaps")
-    parser.add_argument("--max_swaps", type=int, default=20, help="Maximum number of swaps")
+    parser.add_argument("--min_swaps", type=int, default=4, help="Minimum number of swaps")
+    parser.add_argument("--max_swaps", type=int, default=12, help="Maximum number of swaps")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--branching_factor", type=int, default=2, help="Branching factor for prefix sum agents")
+    parser.add_argument("--branching_factor", type=int, default=4, help="Branching factor for prefix sum agents")
     args = parser.parse_args()
 
     # Create a nice table showing all arguments
