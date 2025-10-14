@@ -283,10 +283,23 @@ python chain_of_agents/run_pareto_permutations.py \
 ## Results and Analysis
 
 Experimental results are logged to Weights & Biases and can be visualized using the provided Jupyter notebooks:
-- `khop-notebook.ipynb`: K-hop reasoning analysis
-- `parity-notebook.ipynb`: Parity computation analysis
-- `permutations-notebook.ipynb`: Permutation tracking analysis
-- `pareto-notebook.ipynb`: Pareto frontier visualizations
+
+### K-Hop Reasoning Analysis
+- `khop-notebook.ipynb`: K-hop reasoning performance analysis across different agent types and configurations
+- `khop-comparison-notebook.ipynb`: Model comparison between EXAONE and Llama-8B on k-hop tasks across different fact counts (100, 200, 500)
+- `khop_token_usage_analysis.ipynb`: Computation depth (token usage) analysis as a function of hop count for EXAONE, Llama-8B, and Llama-70B models
+
+### Parity/Prefix Sum Analysis
+- `parity-notebook.ipynb`: Parity computation performance analysis across different agent architectures
+- `parity_llama_comparison_notebook.ipynb`: Model comparison between Llama-8B and Llama-70B on parity tasks with accuracy and error analysis
+
+### Permutation Tracking Analysis
+- `permutations-notebook.ipynb`: Permutation tracking performance analysis across different agent types
+- `permutations-comparison-notebook.ipynb`: Model comparison between Llama-8B and Llama-70B on permutation tasks, showing exact match and element-wise accuracy
+
+### Pareto Frontier Analysis
+- `pareto-notebook.ipynb`: Pareto frontier visualizations exploring computation vs communication tradeoffs for prefix sum tasks
+- `llama_comparison_notebook.ipynb`: Computation vs communication tradeoff analysis comparing Llama-8B and Llama-70B models
 
 Generated figures are saved in the `figures/` directory.
 
