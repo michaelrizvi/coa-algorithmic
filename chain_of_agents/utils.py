@@ -1205,5 +1205,212 @@ def validate_intermediate_steps(predicted_mapping: List[int], expected_size: int
     validation["duplicate_indices"] = [idx for idx in predicted_mapping if predicted_mapping.count(idx) > 1]
     validation["has_duplicates"] = len(validation["duplicate_indices"]) > 0
     validation["out_of_bounds"] = [idx for idx in predicted_mapping if idx < 0 or idx >= expected_size]
-    
+
     return validation
+
+
+# ============================================================================
+# NEEDLE IN HAYSTACK UTILITIES
+# ============================================================================
+
+def load_paul_graham_corpus(corpus_path: str = "data/paul_graham/essays.txt") -> str:
+    """
+    Load Paul Graham essays corpus from disk.
+
+    Args:
+        corpus_path: Path to the Paul Graham essays text file
+
+    Returns:
+        str: Full text corpus
+    """
+    try:
+        with open(corpus_path, 'r', encoding='utf-8') as f:
+            corpus = f.read()
+        logger.info(f"Loaded corpus with {len(corpus)} characters (~{len(corpus.split())} words)")
+        return corpus
+    except FileNotFoundError:
+        logger.error(f"Corpus file not found at {corpus_path}. Please download it first.")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading corpus: {str(e)}")
+        raise
+
+
+def insert_needle_at_depth(
+    haystack: str,
+    needle: str,
+    depth: float,
+    context_length: int
+) -> str:
+    """
+    Insert a needle at a specified depth in the haystack.
+
+    Args:
+        haystack: The full corpus text
+        needle: The needle text to insert
+        depth: Position as fraction (0.0 = start, 1.0 = end)
+        context_length: Target length in words for the haystack
+
+    Returns:
+        str: Haystack text with needle inserted at the specified depth
+    """
+    # Split haystack into words
+    words = haystack.split()
+
+    # Truncate to desired context length
+    if len(words) > context_length:
+        words = words[:context_length]
+
+    # Calculate insertion point
+    insert_position = int(len(words) * depth)
+
+    # Insert needle at the calculated position
+    words.insert(insert_position, needle)
+
+    # Rejoin into text
+    result = " ".join(words)
+
+    logger.debug(f"Inserted needle at position {insert_position}/{len(words)} (depth={depth:.2f})")
+
+    return result
+
+
+def generate_needle_haystack_problem(
+    corpus: str,
+    context_length: int,
+    depth: float,
+    needle: str = "The best thing to do in San Francisco is eat a sandwich and sit in Dolores Park on a sunny day.",
+    query: str = "What is the best thing to do in San Francisco?"
+) -> Tuple[str, str, str]:
+    """
+    Generate a complete needle-in-haystack problem.
+
+    Args:
+        corpus: The full Paul Graham corpus
+        context_length: Target length in words for the haystack
+        depth: Position as fraction (0.0 = start, 1.0 = end) where needle should be inserted
+        needle: The needle text to hide in the haystack
+        query: The query to ask about the needle
+
+    Returns:
+        Tuple of (context_with_needle, query, expected_answer)
+    """
+    # Insert needle into corpus at specified depth
+    context_with_needle = insert_needle_at_depth(corpus, needle, depth, context_length)
+
+    # Extract the expected answer from the needle
+    # For standard needle: "eat a sandwich and sit in Dolores Park on a sunny day"
+    expected_answer = "eat a sandwich and sit in Dolores Park on a sunny day"
+
+    return context_with_needle, query, expected_answer
+
+
+def extract_needle_answer(response: str) -> str:
+    """
+    Extract the answer from model response.
+
+    Args:
+        response: The raw model output
+
+    Returns:
+        str: Extracted answer (cleaned and normalized)
+    """
+    if not response:
+        return ""
+
+    # Clean up the response
+    response = response.strip()
+
+    # Common patterns to remove
+    patterns_to_remove = [
+        r"^Answer:\s*",
+        r"^The answer is:\s*",
+        r"^Based on the context,?\s*",
+        r"^According to the text,?\s*",
+        r"^\s*['\"]",  # Leading quotes
+        r"['\"]$",     # Trailing quotes
+    ]
+
+    for pattern in patterns_to_remove:
+        response = re.sub(pattern, "", response, flags=re.IGNORECASE)
+
+    response = response.strip()
+
+    # Handle multi-sentence responses - take first sentence
+    sentences = response.split('.')
+    if sentences:
+        response = sentences[0].strip()
+
+    return response
+
+
+def check_needle_answer_match(predicted: str, expected: str) -> bool:
+    """
+    Check if predicted answer matches expected answer.
+    Uses fuzzy matching to handle variations in phrasing.
+
+    Args:
+        predicted: The predicted answer from the model
+        expected: The expected ground truth answer
+
+    Returns:
+        bool: True if answers match (exact or fuzzy), False otherwise
+    """
+    if not predicted or not expected:
+        return False
+
+    # Normalize both strings
+    predicted_norm = predicted.lower().strip()
+    expected_norm = expected.lower().strip()
+
+    # Exact match (case-insensitive)
+    if predicted_norm == expected_norm:
+        return True
+
+    # Check if expected answer is contained in predicted
+    if expected_norm in predicted_norm:
+        return True
+
+    # Check for key phrases from the expected answer
+    # For the standard needle, key phrases are: "sandwich", "Dolores Park", "sunny day"
+    key_phrases = ["sandwich", "dolores park", "sunny"]
+
+    matches = sum(1 for phrase in key_phrases if phrase in predicted_norm)
+
+    # Consider it a match if at least 2 out of 3 key phrases are present
+    return matches >= 2
+
+
+def get_needle_haystack_prompts() -> Tuple[str, str]:
+    """
+    Get system prompts for needle-in-haystack task.
+
+    Returns:
+        Tuple of (worker_prompt, manager_prompt)
+    """
+    worker_prompt = """You are a helpful assistant that answers questions based solely on the provided context.
+Your task is to carefully read the context and answer the question accurately.
+
+Important instructions:
+- Only use information from the provided context
+- If the answer is in the context, state it clearly and concisely
+- If the answer is not in the context, say "I cannot find this information in the provided text"
+- Do not make up information or use outside knowledge
+
+Format your response as:
+Answer: [your answer here]"""
+
+    manager_prompt = """You are a manager agent that synthesizes information from multiple worker agents.
+Your task is to combine their findings and provide a final, accurate answer to the user's query.
+
+Important instructions:
+- Review all worker responses carefully
+- If workers agree on an answer, state that answer
+- If workers disagree, use the most commonly reported answer
+- If no workers found the answer, state that clearly
+- Be concise and direct
+
+Format your response as:
+Answer: [final answer here]"""
+
+    return worker_prompt, manager_prompt
