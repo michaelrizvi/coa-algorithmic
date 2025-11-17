@@ -1236,6 +1236,33 @@ def load_paul_graham_corpus(corpus_path: str = "data/paul_graham/essays.txt") ->
         raise
 
 
+def find_sentence_boundary(words: List[str], target_position: int, search_window: int = 50) -> int:
+    """
+    Find the nearest sentence boundary (period, exclamation, or question mark) at or before target position.
+
+    This ensures the needle is inserted at a natural sentence break, matching the standard
+    needle-in-haystack benchmark implementation.
+
+    Args:
+        words: List of words in the haystack
+        target_position: Target insertion position (as word index)
+        search_window: How many words to search backwards for a sentence boundary
+
+    Returns:
+        int: Position after the sentence boundary (where needle should be inserted)
+    """
+    # Search backwards from target position for sentence-ending punctuation
+    start_search = max(0, target_position - search_window)
+
+    for i in range(target_position, start_search, -1):
+        if i < len(words) and (words[i].endswith('.') or words[i].endswith('!') or words[i].endswith('?')):
+            # Insert after the punctuation
+            return i + 1
+
+    # Fallback: if no sentence boundary found, use target position
+    return target_position
+
+
 def insert_needle_at_depth(
     haystack: str,
     needle: str,
@@ -1243,7 +1270,13 @@ def insert_needle_at_depth(
     context_length: int
 ) -> str:
     """
-    Insert a needle at a specified depth in the haystack.
+    Insert a needle at a specified depth in the haystack, matching the standard
+    needle-in-haystack benchmark implementation.
+
+    Key features (matching gkamradt/LLMTest_NeedleInAHaystack):
+    - Repeats corpus when context_length exceeds corpus size
+    - Inserts needle at sentence boundaries for natural blending
+    - Needle is split into individual words (not inserted as single element)
 
     Args:
         haystack: The full corpus text
@@ -1256,21 +1289,38 @@ def insert_needle_at_depth(
     """
     # Split haystack into words
     words = haystack.split()
+    original_corpus_size = len(words)
 
-    # Truncate to desired context length
-    if len(words) > context_length:
+    # For context lengths larger than corpus, repeat the corpus
+    # This matches the standard implementation: concatenate corpus multiple times
+    if context_length > len(words):
+        # Calculate how many times we need to repeat
+        repeats_needed = (context_length // len(words)) + 1
+        words = (words * repeats_needed)[:context_length]
+        logger.info(f"Repeated corpus {repeats_needed} times to reach context_length={context_length} (original corpus: {original_corpus_size} words)")
+    elif len(words) > context_length:
+        # Truncate to desired context length
         words = words[:context_length]
 
-    # Calculate insertion point
-    insert_position = int(len(words) * depth)
+    # Calculate target insertion point based on depth
+    target_position = int(len(words) * depth)
 
-    # Insert needle at the calculated position
-    words.insert(insert_position, needle)
+    # Find sentence boundary near target position
+    # This ensures natural insertion (matching standard implementation)
+    insertion_point = find_sentence_boundary(words, target_position)
+
+    # Split needle into individual words
+    needle_words = needle.split()
+
+    # Insert needle words at the calculated position
+    # CRITICAL: Use slice assignment to insert multiple elements, not .insert()
+    # This ensures needle blends naturally into the text
+    words[insertion_point:insertion_point] = needle_words
 
     # Rejoin into text
     result = " ".join(words)
 
-    logger.debug(f"Inserted needle at position {insert_position}/{len(words)} (depth={depth:.2f})")
+    logger.info(f"Inserted {len(needle_words)}-word needle at position {insertion_point}/{len(words)-len(needle_words)} (target depth={depth:.1%}, actual depth={insertion_point/(len(words)-len(needle_words)):.1%})")
 
     return result
 

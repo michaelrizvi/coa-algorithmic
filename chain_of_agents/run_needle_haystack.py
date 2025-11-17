@@ -20,6 +20,7 @@ import random
 import logging
 import wandb
 from statistics import mean, stdev
+from datetime import datetime
 import math
 import time
 
@@ -73,11 +74,14 @@ def main():
     # Set random seed for reproducibility
     random.seed(args.seed)
 
-    # Initialize W&B
+    # Initialize W&B with unique, informative run name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ctx_range = f"{min(args.context_lengths)}-{max(args.context_lengths)}"
+
     if args.agent_type == "MajorityVotingAgents":
-        run_name = f"needle_{args.agent_type}_agents{args.num_agents}"
+        run_name = f"needle_MV_a{args.num_agents}_ctx{ctx_range}_{timestamp}"
     elif args.agent_type == "ChainOfAgents":
-        run_name = f"needle_{args.agent_type}_chunk{args.chunk_size}"
+        run_name = f"needle_CoA_c{args.chunk_size}_ctx{ctx_range}_{timestamp}"
 
     wandb.init(project="coa-needle-haystack-eval", config=vars(args), name=run_name, reinit=True)
     logger = setup_logger()
@@ -208,21 +212,28 @@ def main():
                 max_completion_tokens = max([stats.get('max_completion_tokens', 0) for stats in token_stats])
                 avg_prompt_tokens = mean([stats.get('avg_prompt_tokens', 0) for stats in token_stats])
                 max_prompt_tokens = max([stats.get('max_prompt_tokens', 0) for stats in token_stats])
+            else:
+                # Fallback if token_stats is empty (shouldn't happen, but be safe)
+                avg_completion_tokens = 0
+                max_completion_tokens = 0
+                avg_prompt_tokens = 0
+                max_prompt_tokens = 0
 
-                # Log aggregated statistics to W&B
-                wandb.log({
-                    "agg_context_length": context_length,
-                    "agg_depth": depth,
-                    "agg_avg_accuracy": avg_accuracy,
-                    "agg_max_accuracy": max_accuracy,
-                    "agg_std_accuracy": std_accuracy,
-                    "agg_se_accuracy": se_accuracy,
-                    "agg_avg_latency": avg_latency,
-                    "agg_avg_completion_tokens": avg_completion_tokens,
-                    "agg_max_completion_tokens": max_completion_tokens,
-                    "agg_avg_prompt_tokens": avg_prompt_tokens,
-                    "agg_max_prompt_tokens": max_prompt_tokens,
-                })
+            # ALWAYS log aggregated statistics to W&B (moved outside if block)
+            # Log with commit=True to ensure immediate persistence (prevents sync issues)
+            wandb.log({
+                "agg_context_length": context_length,
+                "agg_depth": depth,
+                "agg_avg_accuracy": avg_accuracy,
+                "agg_max_accuracy": max_accuracy,
+                "agg_std_accuracy": std_accuracy,
+                "agg_se_accuracy": se_accuracy,
+                "agg_avg_latency": avg_latency,
+                "agg_avg_completion_tokens": avg_completion_tokens,
+                "agg_max_completion_tokens": max_completion_tokens,
+                "agg_avg_prompt_tokens": avg_prompt_tokens,
+                "agg_max_prompt_tokens": max_prompt_tokens,
+            }, commit=True)
 
     logger.info("\n" + "="*70)
     logger.info("EXPERIMENT COMPLETE")
