@@ -184,3 +184,5 @@ wandb/
 data/hotpotqa/*.arrow
 data/hotpotqa/**/*.arrow
 data/hotpotqa/*.lock
+
+*ipynb
