@@ -180,3 +180,7 @@ wandb/
 
 *.pdf
 *.csv
+# HotPotQA dataset files (too large for git)
+data/hotpotqa/*.arrow
+data/hotpotqa/**/*.arrow
+data/hotpotqa/*.lock

@@ -656,6 +656,295 @@ Response: Next Query: Who is Mary's supervisor?"""
         }
 
 
+class BridgeQueryAgents:
+    """
+    Class for implementing 2-hop bridge query reasoning on HotPotQA-style questions.
+
+    Bridge questions require two reasoning steps:
+    1. First hop: Find an intermediate entity (e.g., "Who directed X?")
+    2. Second hop: Answer about that entity (e.g., "When was Y born?")
+
+    This class uses:
+    - QuerySplitterManager: Decomposes original query into first subquery
+    - Worker agents: Process text chunks to find answers (with early stopping)
+    - QueryUpdaterManager: Generates second subquery using intermediate answer
+    - Worker agents: Process chunks again for final answer
+    """
+
+    def __init__(
+        self,
+        worker_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        manager_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        chunk_size: int = 500,  # words per worker chunk
+        max_tokens_worker: int = 512,
+        max_tokens_manager: int = 1024,
+        worker_prompt: Optional[str] = None,
+        query_splitter_prompt: Optional[str] = None,
+        query_updater_prompt: Optional[str] = None
+    ):
+        """
+        Initialize BridgeQueryAgents.
+
+        Args:
+            worker_model: Model for worker agents
+            manager_model: Model for manager agents (query splitter and updater)
+            chunk_size: Number of words per text chunk for workers
+            max_tokens_worker: Max tokens for worker responses
+            max_tokens_manager: Max tokens for manager responses
+            worker_prompt: Custom worker prompt (if None, uses default)
+            query_splitter_prompt: Custom query splitter prompt (if None, uses default)
+            query_updater_prompt: Custom query updater prompt (if None, uses default)
+        """
+        from utils import get_bridge_query_prompts
+
+        # Get default prompts if not provided
+        default_splitter, default_updater, default_worker = get_bridge_query_prompts()
+
+        self.worker_model = worker_model
+        self.manager_model = manager_model
+        self.chunk_size = chunk_size
+        self.max_tokens_worker = max_tokens_worker
+        self.max_tokens_manager = max_tokens_manager
+
+        self.worker_prompt = worker_prompt or default_worker
+        self.query_splitter_prompt = query_splitter_prompt or default_splitter
+        self.query_updater_prompt = query_updater_prompt or default_updater
+
+        logger.info(f"Initialized BridgeQueryAgents with {worker_model} workers and {manager_model} managers")
+
+    def _extract_first_subquery(self, response: str) -> str:
+        """
+        Extract first subquery from QuerySplitterManager response.
+
+        Args:
+            response: Manager's response text
+
+        Returns:
+            str: Extracted first subquery, or empty string if not found
+        """
+        import re
+        pattern = r"First subquery:\s*(.+?)(?:\n|$)"
+        match = re.search(pattern, response, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        logger.warning("Could not extract first subquery from manager response")
+        return ""
+
+    def _extract_second_subquery(self, response: str) -> str:
+        """
+        Extract second subquery from QueryUpdaterManager response.
+
+        Args:
+            response: Manager's response text
+
+        Returns:
+            str: Extracted second subquery, or empty string if not found
+        """
+        import re
+        pattern = r"Second subquery:\s*(.+?)(?:\n|$)"
+        match = re.search(pattern, response, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        logger.warning("Could not extract second subquery from manager response")
+        return ""
+
+    def process(self, input_text: str, query: str, extraction_func=None) -> Dict:
+        """
+        Process a bridge question using 2-hop reasoning.
+
+        Pipeline:
+        1. QuerySplitterManager generates first subquery from original query
+        2. Workers process text chunks to answer first subquery (early stopping)
+        3. QueryUpdaterManager generates second subquery using intermediate answer
+        4. Workers process chunks again to answer second subquery (early stopping)
+
+        Args:
+            input_text: Full context text (all paragraphs)
+            query: Original bridge question
+            extraction_func: Optional function to extract answers from worker responses
+
+        Returns:
+            Dict with 'content' (final answer) and 'token_usage' statistics
+        """
+        # Split input text into chunks
+        chunks = split_into_chunks(input_text, self.chunk_size)
+        logger.info(f"Split input into {len(chunks)} chunks")
+
+        # Track token usage across all calls
+        all_worker_completion_tokens = []
+        all_worker_prompt_tokens = []
+        total_manager_completion_tokens = 0
+        total_manager_prompt_tokens = 0
+
+        # ========== FIRST HOP: Generate first subquery ==========
+        logger.info(f"Original query: {query}")
+
+        query_splitter = ManagerAgent(
+            self.manager_model,
+            self.query_splitter_prompt,
+            max_tokens=self.max_tokens_manager
+        )
+
+        splitter_response = query_splitter.synthesize([query], "Decompose the query")
+        first_subquery = self._extract_first_subquery(splitter_response["content"])
+
+        # Track manager tokens
+        total_manager_completion_tokens += splitter_response["usage"].completion_tokens
+        total_manager_prompt_tokens += getattr(splitter_response["usage"], 'prompt_tokens', 0)
+
+        if not first_subquery:
+            logger.error("Failed to extract first subquery")
+            return {
+                'content': "",
+                'token_usage': {
+                    'avg_completion_tokens': 0,
+                    'max_completion_tokens': 0,
+                    'avg_prompt_tokens': 0,
+                    'max_prompt_tokens': 0
+                }
+            }
+
+        logger.info(f"First subquery: {first_subquery}")
+        del query_splitter
+
+        # ========== FIRST HOP: Workers answer first subquery ==========
+        intermediate_answer = ""
+
+        for i, chunk in enumerate(chunks):
+            worker = WorkerAgent(
+                self.worker_model,
+                self.worker_prompt,
+                max_tokens=self.max_tokens_worker
+            )
+
+            response = worker.process_chunk(chunk, first_subquery)
+
+            # Track tokens
+            all_worker_completion_tokens.append(response["usage"].completion_tokens)
+            all_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
+
+            # Extract answer
+            if extraction_func:
+                answer = extraction_func(response["content"])
+            else:
+                answer = response["content"]
+
+            logger.info(f"Worker {i+1}/{len(chunks)} answer: {answer}")
+
+            # Early stopping: if valid answer found, stop
+            if answer and answer.lower() not in ["not found", "", "none"]:
+                intermediate_answer = answer
+                logger.info(f"Found intermediate answer, stopping first hop early")
+                del worker
+                break
+
+            del worker
+
+        if not intermediate_answer:
+            logger.warning("No valid answer found in first hop")
+            return {
+                'content': "",
+                'token_usage': {
+                    'avg_completion_tokens': sum(all_worker_completion_tokens) / len(all_worker_completion_tokens) if all_worker_completion_tokens else 0,
+                    'max_completion_tokens': max(all_worker_completion_tokens) if all_worker_completion_tokens else 0,
+                    'avg_prompt_tokens': sum(all_worker_prompt_tokens) / len(all_worker_prompt_tokens) if all_worker_prompt_tokens else 0,
+                    'max_prompt_tokens': max(all_worker_prompt_tokens) if all_worker_prompt_tokens else 0
+                }
+            }
+
+        logger.info(f"Intermediate answer: {intermediate_answer}")
+
+        # ========== SECOND HOP: Generate second subquery ==========
+        query_updater = ManagerAgent(
+            self.manager_model,
+            self.query_updater_prompt,
+            max_tokens=self.max_tokens_manager
+        )
+
+        updater_input = f"Original query: {query}\nIntermediate answer: {intermediate_answer}"
+        updater_response = query_updater.synthesize([updater_input], "Generate second subquery")
+        second_subquery = self._extract_second_subquery(updater_response["content"])
+
+        # Track manager tokens
+        total_manager_completion_tokens += updater_response["usage"].completion_tokens
+        total_manager_prompt_tokens += getattr(updater_response["usage"], 'prompt_tokens', 0)
+
+        if not second_subquery:
+            logger.error("Failed to extract second subquery")
+            return {
+                'content': "",
+                'token_usage': {
+                    'avg_completion_tokens': sum(all_worker_completion_tokens) / len(all_worker_completion_tokens) if all_worker_completion_tokens else 0,
+                    'max_completion_tokens': max(all_worker_completion_tokens) if all_worker_completion_tokens else 0,
+                    'avg_prompt_tokens': sum(all_worker_prompt_tokens) / len(all_worker_prompt_tokens) if all_worker_prompt_tokens else 0,
+                    'max_prompt_tokens': max(all_worker_prompt_tokens) if all_worker_prompt_tokens else 0
+                }
+            }
+
+        logger.info(f"Second subquery: {second_subquery}")
+        del query_updater
+
+        # ========== SECOND HOP: Workers answer second subquery ==========
+        final_answer = ""
+
+        for i, chunk in enumerate(chunks):
+            worker = WorkerAgent(
+                self.worker_model,
+                self.worker_prompt,
+                max_tokens=self.max_tokens_worker
+            )
+
+            response = worker.process_chunk(chunk, second_subquery)
+
+            # Track tokens
+            all_worker_completion_tokens.append(response["usage"].completion_tokens)
+            all_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
+
+            # Extract answer
+            if extraction_func:
+                answer = extraction_func(response["content"])
+            else:
+                answer = response["content"]
+
+            logger.info(f"Worker {i+1}/{len(chunks)} answer: {answer}")
+
+            # Early stopping: if valid answer found, stop
+            if answer and answer.lower() not in ["not found", "", "none"]:
+                final_answer = answer
+                logger.info(f"Found final answer, stopping second hop early")
+                del worker
+                break
+
+            del worker
+
+        if not final_answer:
+            logger.warning("No valid answer found in second hop")
+
+        # ========== Calculate token usage statistics ==========
+        avg_completion_tokens = sum(all_worker_completion_tokens) / len(all_worker_completion_tokens) if all_worker_completion_tokens else 0
+        max_completion_tokens = max(all_worker_completion_tokens) if all_worker_completion_tokens else 0
+        avg_prompt_tokens = sum(all_worker_prompt_tokens) / len(all_worker_prompt_tokens) if all_worker_prompt_tokens else 0
+        max_prompt_tokens = max(all_worker_prompt_tokens) if all_worker_prompt_tokens else 0
+
+        # Add manager token usage to totals
+        avg_completion_tokens += total_manager_completion_tokens
+        max_completion_tokens += total_manager_completion_tokens
+        avg_prompt_tokens += total_manager_prompt_tokens
+        max_prompt_tokens += total_manager_prompt_tokens
+
+        return {
+            'content': final_answer,
+            'token_usage': {
+                'avg_completion_tokens': avg_completion_tokens,
+                'max_completion_tokens': max_completion_tokens,
+                'avg_prompt_tokens': avg_prompt_tokens,
+                'max_prompt_tokens': max_prompt_tokens
+            }
+        }
+
+
 class PrefixSumAgents:
     """Class for implementing prefix sum calculation using multiple agents."""
     

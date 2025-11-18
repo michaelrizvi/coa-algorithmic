@@ -1464,3 +1464,355 @@ Format your response as:
 Answer: [final answer here]"""
 
     return worker_prompt, manager_prompt
+
+
+# ============================================================================
+# HOTPOTQA UTILITIES
+# ============================================================================
+
+def load_hotpotqa_data(subset_size: int = 2000, use_gold_only: bool = False, cache_dir: str = "data/hotpotqa") -> List[Dict]:
+    """
+    Load HotPotQA test set, filtering for "bridge" type questions only.
+
+    To download HotPotQA for the first time, this function uses the HuggingFace datasets library:
+        from datasets import load_dataset
+        dataset = load_dataset("hotpot_qa", "fullwiki")
+
+    Args:
+        subset_size: Number of examples to return from test set (default: 2000)
+        use_gold_only: If True, context will contain only supporting paragraphs;
+                      if False, context contains all paragraphs including distractors
+        cache_dir: Directory to cache downloaded data
+
+    Returns:
+        List[Dict]: List of examples, each with keys:
+            - "question": The query string
+            - "answer": Ground truth answer
+            - "context": Formatted context string (either full or gold-only)
+            - "supporting_facts": List of [title, sentence_id] pairs for gold facts
+            - "type": Question type (will always be "bridge" due to filtering)
+    """
+    import os
+    from datasets import load_dataset
+
+    logger.info(f"Loading HotPotQA test set (bridge questions only)...")
+
+    # Create cache directory if it doesn't exist
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # Load dataset from HuggingFace
+    # Note: HotPotQA has splits: train, validation, test
+    # We use validation split as "test" since test labels are not public
+    dataset = load_dataset("hotpot_qa", "fullwiki", cache_dir=cache_dir)
+    test_data = dataset["validation"]
+
+    logger.info(f"Loaded {len(test_data)} total examples from validation split")
+
+    # Filter to bridge questions only
+    bridge_examples = []
+    for example in test_data:
+        if example["type"] == "bridge":
+            # Format context
+            context = format_hotpotqa_context(
+                example["context"],
+                example["supporting_facts"],
+                use_gold_only
+            )
+
+            bridge_examples.append({
+                "question": example["question"],
+                "answer": example["answer"],
+                "context": context,
+                "supporting_facts": example["supporting_facts"],
+                "type": example["type"]
+            })
+
+    logger.info(f"Filtered to {len(bridge_examples)} bridge questions")
+
+    # Take subset if requested
+    if subset_size and subset_size < len(bridge_examples):
+        bridge_examples = bridge_examples[:subset_size]
+        logger.info(f"Selected first {subset_size} examples")
+
+    return bridge_examples
+
+
+def format_hotpotqa_context(
+    context: List,
+    supporting_facts: Dict = None,
+    use_gold_only: bool = False
+) -> str:
+    """
+    Format HotPotQA context into a single string.
+
+    HotPotQA context format is a dict with "title" (list of titles) and "sentences"
+    (list of lists of sentences) where context["title"][i] corresponds to
+    context["sentences"][i].
+
+    Args:
+        context: Dict with "title" and "sentences" keys, or list of [title, sentences] pairs
+        supporting_facts: Dict with "title" and "sent_id" lists indicating gold facts
+        use_gold_only: If True, only include paragraphs mentioned in supporting_facts
+
+    Returns:
+        str: Formatted context string with paragraphs separated by newlines
+    """
+    # Extract gold paragraph titles if needed
+    gold_titles = set()
+    if use_gold_only and supporting_facts:
+        # supporting_facts format: {"title": [title1, title1, ...], "sent_id": [0, 1, ...]}
+        gold_titles = set(supporting_facts["title"])
+
+    formatted_paragraphs = []
+
+    # Handle dict format (from HuggingFace datasets)
+    if isinstance(context, dict):
+        titles = context["title"]
+        sentences_list = context["sentences"]
+
+        for title, sentences in zip(titles, sentences_list):
+            # Skip non-gold paragraphs if use_gold_only is True
+            if use_gold_only and title not in gold_titles:
+                continue
+
+            # Join sentences into a paragraph
+            paragraph_text = " ".join(sentences)
+
+            # Format: "Title: <title>\n<paragraph_text>"
+            formatted = f"{title}: {paragraph_text}"
+            formatted_paragraphs.append(formatted)
+
+    # Handle list of [title, sentences] pairs format (for testing)
+    elif isinstance(context, list):
+        for item in context:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                title, sentences = item
+
+                # Skip non-gold paragraphs if use_gold_only is True
+                if use_gold_only and title not in gold_titles:
+                    continue
+
+                # Join sentences into a paragraph
+                if isinstance(sentences, list):
+                    paragraph_text = " ".join(sentences)
+                else:
+                    paragraph_text = sentences
+
+                # Format: "Title: <title>\n<paragraph_text>"
+                formatted = f"{title}: {paragraph_text}"
+                formatted_paragraphs.append(formatted)
+
+    # Join all paragraphs with double newlines for clarity
+    return "\n\n".join(formatted_paragraphs)
+
+
+def extract_hotpotqa_answer(response: str) -> str:
+    """
+    Extract answer from model response for HotPotQA.
+
+    Handles common response formats:
+    - "Answer: X"
+    - "The answer is: X"
+    - "The answer is X"
+
+    Args:
+        response: Raw model output
+
+    Returns:
+        str: Extracted and normalized answer
+    """
+    if not response:
+        return ""
+
+    # Clean up the response
+    response = response.strip()
+
+    # Try to extract using common patterns
+    patterns = [
+        r"Answer:\s*(.+?)(?:\n|$)",
+        r"The answer is:?\s*(.+?)(?:\n|$)",
+        r"(?:^|\n)(.+?)(?:\n|$)"  # Fallback: first line
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, response, re.IGNORECASE)
+        if match:
+            answer = match.group(1).strip()
+            # Remove leading/trailing quotes if present
+            answer = answer.strip('"\'')
+            return answer
+
+    return response.strip()
+
+
+def normalize_answer(text: str) -> str:
+    """
+    Normalize answer text for HotPotQA evaluation.
+
+    Follows standard HotPotQA normalization:
+    - Lowercase
+    - Remove articles (a, an, the)
+    - Remove punctuation
+    - Remove extra whitespace
+
+    Args:
+        text: Answer text to normalize
+
+    Returns:
+        str: Normalized answer
+    """
+    import string
+
+    # Lowercase
+    text = text.lower()
+
+    # Remove punctuation
+    text = text.translate(str.maketrans('', '', string.punctuation))
+
+    # Remove articles
+    words = text.split()
+    words = [w for w in words if w not in ['a', 'an', 'the']]
+
+    # Join and normalize whitespace
+    text = ' '.join(words)
+
+    return text.strip()
+
+
+def check_hotpotqa_exact_match(predicted: str, ground_truth: str) -> bool:
+    """
+    Check exact match between predicted and ground truth answers.
+
+    Uses standard HotPotQA normalization before comparison.
+
+    Args:
+        predicted: Predicted answer from model
+        ground_truth: Ground truth answer
+
+    Returns:
+        bool: True if answers match after normalization
+    """
+    if not predicted or not ground_truth:
+        return False
+
+    # Normalize both answers
+    pred_norm = normalize_answer(predicted)
+    gt_norm = normalize_answer(ground_truth)
+
+    return pred_norm == gt_norm
+
+
+def get_bridge_query_prompts() -> Tuple[str, str, str]:
+    """
+    Get system prompts for BridgeQueryAgents components.
+
+    Returns:
+        Tuple of (query_splitter_prompt, query_updater_prompt, worker_prompt)
+    """
+    query_splitter_prompt = """You are an expert at decomposing complex multi-hop questions into simpler sub-questions.
+
+Your task is to identify the FIRST sub-question that needs to be answered in a bridge-style question.
+
+Bridge questions require finding an entity first, then asking about that entity. Your job is to extract the first step.
+
+Examples:
+
+Example 1:
+Query: What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?
+First subquery: Who portrayed Corliss Archer in the film Kiss and Tell?
+
+Example 2:
+Query: What is the birthday of the director of the film Dil Dhadakne Do?
+First subquery: Who is the director of the film Dil Dhadakne Do?
+
+Example 3:
+Query: In what city was the producer of the album The Blueprint born?
+First subquery: Who is the producer of the album The Blueprint?
+
+Instructions:
+- Identify the entity that needs to be found first
+- Ask a simple, direct question to find that entity
+- Keep the sub-question focused and clear
+- Format your response exactly as: "First subquery: [your sub-question]"
+
+Now decompose the following query:"""
+
+    query_updater_prompt = """You are an expert at constructing follow-up questions based on intermediate answers.
+
+Your task is to take the original multi-hop question and an intermediate answer, then generate the final sub-question needed to answer the original query.
+
+You will receive:
+1. The original complex question
+2. An intermediate answer (the entity found in the first step)
+
+Your job is to construct the second question that uses this intermediate answer.
+
+Examples:
+
+Example 1:
+Original query: What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?
+Intermediate answer: Shirley Temple
+Second subquery: What government position was held by Shirley Temple?
+
+Example 2:
+Original query: What is the birthday of the director of the film Dil Dhadakne Do?
+Intermediate answer: Zoya Akhtar
+Second subquery: What is the birthday of Zoya Akhtar?
+
+Example 3:
+Original query: In what city was the producer of the album The Blueprint born?
+Intermediate answer: Kanye West
+Second subquery: In what city was Kanye West born?
+
+Instructions:
+- Use the intermediate answer to replace the entity reference in the original query
+- Keep the question simple and direct
+- Focus on what information is still needed to answer the original query
+- Format your response exactly as: "Second subquery: [your sub-question]"
+
+Now generate the second sub-question:"""
+
+    worker_prompt = """You are a helpful assistant that answers questions based ONLY on the provided context.
+
+Your task is to carefully read the given text and answer the question if the information is present.
+
+IMPORTANT Instructions:
+- Only use information explicitly stated in the provided context
+- If the answer is clearly in the context, state it directly and concisely
+- If the information is NOT in the context, respond with "Not Found"
+- Do not make assumptions or use outside knowledge
+- Be precise and specific in your answer
+
+Format your response as:
+Answer: [your answer here]
+
+If the information is not in the context:
+Answer: Not Found"""
+
+    return query_splitter_prompt, query_updater_prompt, worker_prompt
+
+
+def get_hotpotqa_majority_vote_prompt() -> str:
+    """
+    Get system prompt for majority voting agents on HotPotQA.
+
+    Returns:
+        str: System prompt for majority voting
+    """
+    return """You are an expert at answering complex multi-hop questions by carefully analyzing provided context.
+
+Your task is to read the given context documents and answer the question accurately.
+
+Instructions:
+- Read all provided context documents carefully
+- Identify the key information needed to answer the question
+- For bridge questions, you may need to:
+  1. First find an intermediate entity mentioned in the question
+  2. Then find information about that entity to answer the final question
+- Provide a clear, concise answer based solely on the context
+- If the answer cannot be determined from the context, state that clearly
+
+Format your response as:
+Answer: [your answer here]
+
+Be systematic and thorough in your reasoning."""

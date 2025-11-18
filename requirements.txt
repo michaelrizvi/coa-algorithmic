@@ -3,4 +3,6 @@ tiktoken>=0.5.0
 python-dotenv>=1.0.0
 typing-extensions>=4.5.0
 flask>=2.0.0
-PyMuPDF  # for PDF parsing 
+PyMuPDF  # for PDF parsing
+datasets>=2.0.0  # for HotPotQA dataset loading
+tabulate>=0.9.0  # for nice table formatting in CLI 
