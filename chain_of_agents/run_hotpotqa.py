@@ -10,7 +10,8 @@ from main import BridgeQueryAgents, MajorityVotingAgents
 from utils import (
     load_hotpotqa_data,
     extract_hotpotqa_answer,
-    check_hotpotqa_exact_match,
+    hotpotqa_exact_match,
+    hotpotqa_f1_score,
     get_bridge_query_prompts,
     get_hotpotqa_majority_vote_prompt
 )
@@ -110,7 +111,8 @@ def main():
         )
 
     # Run experiments
-    overall_accuracies = []
+    overall_em_scores = []
+    overall_f1_scores = []
     overall_token_stats = []
     run_count = 0  # Global counter for step management
 
@@ -129,7 +131,8 @@ def main():
             logger.info(f"Context length: {len(context.split())} words")
 
             # Run multiple times for variance estimation
-            run_accuracies = []
+            run_em_scores = []
+            run_f1_scores = []
             run_token_stats = []
 
             for run_idx in range(args.num_runs):
@@ -145,15 +148,16 @@ def main():
 
                     logger.info(f"Predicted answer: {predicted_answer}")
 
-                    # Evaluate exact match
-                    is_correct = check_hotpotqa_exact_match(predicted_answer, ground_truth)
-                    accuracy = int(is_correct)
+                    # Evaluate using official HotPotQA metrics
+                    em_score = hotpotqa_exact_match(predicted_answer, ground_truth)
+                    f1 = hotpotqa_f1_score(predicted_answer, ground_truth)
 
-                    logger.info(f"Correct: {is_correct}")
+                    logger.info(f"EM: {int(em_score)}, F1: {f1:.3f}")
                     logger.info(f"Token usage - Avg completion: {token_usage['avg_completion_tokens']:.2f}, "
                               f"Max completion: {token_usage['max_completion_tokens']}")
 
-                    run_accuracies.append(accuracy)
+                    run_em_scores.append(int(em_score))
+                    run_f1_scores.append(f1)
                     run_token_stats.append(token_usage)
 
                     # Log individual run to wandb
@@ -163,7 +167,8 @@ def main():
                         "run_count": run_count,
                         "individual/example_id": example_idx,
                         "individual/run_id": run_idx,
-                        "individual/correct": accuracy,
+                        "individual/em": int(em_score),
+                        "individual/f1": f1,
                         "individual/avg_completion_tokens": token_usage['avg_completion_tokens'],
                         "individual/max_completion_tokens": token_usage['max_completion_tokens'],
                         "individual/avg_prompt_tokens": token_usage['avg_prompt_tokens'],
@@ -172,7 +177,8 @@ def main():
 
                 except Exception as e:
                     logger.error(f"Error processing example {example_idx}, run {run_idx}: {str(e)}")
-                    run_accuracies.append(0)
+                    run_em_scores.append(0)
+                    run_f1_scores.append(0.0)
                     # Add dummy token stats for failed runs
                     run_token_stats.append({
                         'avg_completion_tokens': 0,
@@ -182,15 +188,20 @@ def main():
                     })
 
             # Calculate statistics for this example across runs
-            avg_accuracy = mean(run_accuracies)
+            avg_em = mean(run_em_scores)
+            avg_f1 = mean(run_f1_scores)
 
             # Calculate standard error (SE = std_dev / sqrt(n))
-            if len(run_accuracies) > 1:
-                std_accuracy = stdev(run_accuracies)
-                se_accuracy = std_accuracy / math.sqrt(len(run_accuracies))
+            if len(run_em_scores) > 1:
+                std_em = stdev(run_em_scores)
+                se_em = std_em / math.sqrt(len(run_em_scores))
+                std_f1 = stdev(run_f1_scores)
+                se_f1 = std_f1 / math.sqrt(len(run_f1_scores))
             else:
-                std_accuracy = 0.0
-                se_accuracy = 0.0
+                std_em = 0.0
+                se_em = 0.0
+                std_f1 = 0.0
+                se_f1 = 0.0
 
             # Average token stats across runs
             avg_completion_tokens = mean([stats['avg_completion_tokens'] for stats in run_token_stats])
@@ -199,11 +210,13 @@ def main():
             max_prompt_tokens = max([stats['max_prompt_tokens'] for stats in run_token_stats])
 
             logger.info(f"\nExample {example_idx} Summary:")
-            logger.info(f"Avg Accuracy: {avg_accuracy:.3f} ± {se_accuracy:.3f}")
+            logger.info(f"Avg EM: {avg_em:.3f} ± {se_em:.3f}")
+            logger.info(f"Avg F1: {avg_f1:.3f} ± {se_f1:.3f}")
             logger.info(f"Avg Completion Tokens: {avg_completion_tokens:.2f}")
 
             # Store for overall statistics
-            overall_accuracies.extend(run_accuracies)
+            overall_em_scores.extend(run_em_scores)
+            overall_f1_scores.extend(run_f1_scores)
             overall_token_stats.extend(run_token_stats)
 
             # Log aggregated example stats to wandb with commit=True
@@ -211,20 +224,23 @@ def main():
             wandb.log({
                 "run_count": run_count,
                 "agg/example_id": example_idx,
-                "agg/avg_accuracy": avg_accuracy,
-                "agg/se_accuracy": se_accuracy,
-                "agg/std_accuracy": std_accuracy,
+                "agg/avg_em": avg_em,
+                "agg/se_em": se_em,
+                "agg/std_em": std_em,
+                "agg/avg_f1": avg_f1,
+                "agg/se_f1": se_f1,
+                "agg/std_f1": std_f1,
                 "agg/avg_completion_tokens": avg_completion_tokens,
                 "agg/max_completion_tokens": max_completion_tokens,
                 "agg/avg_prompt_tokens": avg_prompt_tokens,
                 "agg/max_prompt_tokens": max_prompt_tokens,
-                "agg/num_runs": len(run_accuracies)
+                "agg/num_runs": len(run_em_scores)
             }, commit=True, step=run_count)
 
     except KeyboardInterrupt:
         logger.warning("\n" + "="*60)
         logger.warning("EXPERIMENT INTERRUPTED BY USER")
-        logger.warning(f"Completed {len(overall_accuracies)}/{len(dataset) * args.num_runs} runs")
+        logger.warning(f"Completed {len(overall_em_scores)}/{len(dataset) * args.num_runs} runs")
         logger.warning("="*60)
         raise
 
@@ -232,21 +248,31 @@ def main():
         logger.error("\n" + "="*60)
         logger.error("EXPERIMENT FAILED WITH ERROR")
         logger.error(f"Error: {str(e)}")
-        logger.error(f"Completed {len(overall_accuracies)}/{len(dataset) * args.num_runs} runs")
+        logger.error(f"Completed {len(overall_em_scores)}/{len(dataset) * args.num_runs} runs")
         logger.error("="*60)
         raise
 
     finally:
         # ALWAYS calculate and log final statistics, even if interrupted
-        # Calculate overall statistics
-        overall_avg_accuracy = mean(overall_accuracies) if overall_accuracies else 0.0
+        # Calculate overall statistics for EM
+        overall_avg_em = mean(overall_em_scores) if overall_em_scores else 0.0
 
-        if len(overall_accuracies) > 1:
-            overall_std_accuracy = stdev(overall_accuracies)
-            overall_se_accuracy = overall_std_accuracy / math.sqrt(len(overall_accuracies))
+        if len(overall_em_scores) > 1:
+            overall_std_em = stdev(overall_em_scores)
+            overall_se_em = overall_std_em / math.sqrt(len(overall_em_scores))
         else:
-            overall_std_accuracy = 0.0
-            overall_se_accuracy = 0.0
+            overall_std_em = 0.0
+            overall_se_em = 0.0
+
+        # Calculate overall statistics for F1
+        overall_avg_f1 = mean(overall_f1_scores) if overall_f1_scores else 0.0
+
+        if len(overall_f1_scores) > 1:
+            overall_std_f1 = stdev(overall_f1_scores)
+            overall_se_f1 = overall_std_f1 / math.sqrt(len(overall_f1_scores))
+        else:
+            overall_std_f1 = 0.0
+            overall_se_f1 = 0.0
 
         overall_avg_completion_tokens = mean([stats['avg_completion_tokens'] for stats in overall_token_stats]) if overall_token_stats else 0.0
         overall_max_completion_tokens = max([stats['max_completion_tokens'] for stats in overall_token_stats]) if overall_token_stats else 0.0
@@ -261,8 +287,9 @@ def main():
         summary_table = [
             ["Total Examples", len(dataset)],
             ["Runs per Example", args.num_runs],
-            ["Total Runs", len(overall_accuracies)],
-            ["Overall Accuracy", f"{overall_avg_accuracy:.3f} ± {overall_se_accuracy:.3f}"],
+            ["Total Runs", len(overall_em_scores)],
+            ["Overall EM", f"{overall_avg_em:.3f} ± {overall_se_em:.3f}"],
+            ["Overall F1", f"{overall_avg_f1:.3f} ± {overall_se_f1:.3f}"],
             ["Avg Completion Tokens", f"{overall_avg_completion_tokens:.2f}"],
             ["Max Completion Tokens", f"{overall_max_completion_tokens}"],
             ["Avg Prompt Tokens", f"{overall_avg_prompt_tokens:.2f}"],
@@ -274,14 +301,17 @@ def main():
 
         # Log final summary to wandb with final/ prefix (no step)
         wandb.log({
-            "final/overall_accuracy": overall_avg_accuracy,
-            "final/overall_se_accuracy": overall_se_accuracy,
-            "final/overall_std_accuracy": overall_std_accuracy,
+            "final/overall_em": overall_avg_em,
+            "final/overall_se_em": overall_se_em,
+            "final/overall_std_em": overall_std_em,
+            "final/overall_f1": overall_avg_f1,
+            "final/overall_se_f1": overall_se_f1,
+            "final/overall_std_f1": overall_std_f1,
             "final/avg_completion_tokens": overall_avg_completion_tokens,
             "final/max_completion_tokens": overall_max_completion_tokens,
             "final/avg_prompt_tokens": overall_avg_prompt_tokens,
             "final/max_prompt_tokens": overall_max_prompt_tokens,
-            "final/total_runs": len(overall_accuracies),
+            "final/total_runs": len(overall_em_scores),
             "final/total_examples": len(dataset)
         })
 

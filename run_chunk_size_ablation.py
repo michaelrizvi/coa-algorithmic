@@ -216,16 +216,33 @@ def main():
 
             # Calculate average token statistics
             if token_stats:
-                avg_completion_tokens = mean([stats.get('avg_completion_tokens', 0) for stats in token_stats])
+                completion_tokens_list = [stats.get('avg_completion_tokens', 0) for stats in token_stats]
+                prompt_tokens_list = [stats.get('avg_prompt_tokens', 0) for stats in token_stats]
+
+                avg_completion_tokens = mean(completion_tokens_list)
                 max_completion_tokens = max([stats.get('max_completion_tokens', 0) for stats in token_stats])
-                avg_prompt_tokens = mean([stats.get('avg_prompt_tokens', 0) for stats in token_stats])
+                avg_prompt_tokens = mean(prompt_tokens_list)
                 max_prompt_tokens = max([stats.get('max_prompt_tokens', 0) for stats in token_stats])
+
+                # Calculate standard error for token metrics
+                if n_runs > 1:
+                    std_completion_tokens = stdev(completion_tokens_list)
+                    se_completion_tokens = std_completion_tokens / math.sqrt(n_runs)
+                    std_prompt_tokens = stdev(prompt_tokens_list)
+                    se_prompt_tokens = std_prompt_tokens / math.sqrt(n_runs)
+                else:
+                    std_completion_tokens = se_completion_tokens = 0.0
+                    std_prompt_tokens = se_prompt_tokens = 0.0
             else:
                 # Fallback if token_stats is empty (shouldn't happen, but be safe)
                 avg_completion_tokens = 0
                 max_completion_tokens = 0
                 avg_prompt_tokens = 0
                 max_prompt_tokens = 0
+                std_completion_tokens = 0
+                se_completion_tokens = 0
+                std_prompt_tokens = 0
+                se_prompt_tokens = 0
 
             # Log aggregated statistics to W&B with commit=True
             # This finalizes the step and ensures data is synced
@@ -240,8 +257,12 @@ def main():
                 "agg/avg_latency": avg_latency,
                 "agg/avg_completion_tokens": avg_completion_tokens,
                 "agg/max_completion_tokens": max_completion_tokens,
+                "agg/std_completion_tokens": std_completion_tokens,
+                "agg/se_completion_tokens": se_completion_tokens,
                 "agg/avg_prompt_tokens": avg_prompt_tokens,
                 "agg/max_prompt_tokens": max_prompt_tokens,
+                "agg/std_prompt_tokens": std_prompt_tokens,
+                "agg/se_prompt_tokens": se_prompt_tokens,
             }, commit=True, step=experiment_count)
 
             # Store results for final table

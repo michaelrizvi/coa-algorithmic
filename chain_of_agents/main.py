@@ -680,7 +680,8 @@ class BridgeQueryAgents:
         max_tokens_manager: int = 1024,
         worker_prompt: Optional[str] = None,
         query_splitter_prompt: Optional[str] = None,
-        query_updater_prompt: Optional[str] = None
+        query_updater_prompt: Optional[str] = None,
+        nb_retries: int = 3
     ):
         """
         Initialize BridgeQueryAgents.
@@ -694,6 +695,7 @@ class BridgeQueryAgents:
             worker_prompt: Custom worker prompt (if None, uses default)
             query_splitter_prompt: Custom query splitter prompt (if None, uses default)
             query_updater_prompt: Custom query updater prompt (if None, uses default)
+            nb_retries: Number of retries when all workers return "Not Found" (default: 3)
         """
         from utils import get_bridge_query_prompts
 
@@ -705,12 +707,13 @@ class BridgeQueryAgents:
         self.chunk_size = chunk_size
         self.max_tokens_worker = max_tokens_worker
         self.max_tokens_manager = max_tokens_manager
+        self.nb_retries = nb_retries
 
         self.worker_prompt = worker_prompt or default_worker
         self.query_splitter_prompt = query_splitter_prompt or default_splitter
         self.query_updater_prompt = query_updater_prompt or default_updater
 
-        logger.info(f"Initialized BridgeQueryAgents with {worker_model} workers and {manager_model} managers")
+        logger.info(f"Initialized BridgeQueryAgents with {worker_model} workers and {manager_model} managers (retries={nb_retries})")
 
     def _extract_first_subquery(self, response: str) -> str:
         """
@@ -809,41 +812,52 @@ class BridgeQueryAgents:
         logger.info(f"First subquery: {first_subquery}")
         del query_splitter
 
-        # ========== FIRST HOP: Workers answer first subquery ==========
+        # ========== FIRST HOP: Workers answer first subquery (with retry) ==========
         intermediate_answer = ""
+        retry_count = 0
 
-        for i, chunk in enumerate(chunks):
-            worker = WorkerAgent(
-                self.worker_model,
-                self.worker_prompt,
-                max_tokens=self.max_tokens_worker
-            )
+        while not intermediate_answer and retry_count < self.nb_retries:
+            if retry_count > 0:
+                logger.info(f"First hop retry {retry_count}/{self.nb_retries - 1} - shuffling chunks")
+                # Shuffle chunks for retry
+                random.shuffle(chunks)
 
-            response = worker.process_chunk(chunk, first_subquery)
+            for i, chunk in enumerate(chunks):
+                worker = WorkerAgent(
+                    self.worker_model,
+                    self.worker_prompt,
+                    max_tokens=self.max_tokens_worker
+                )
 
-            # Track tokens
-            all_worker_completion_tokens.append(response["usage"].completion_tokens)
-            all_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
+                response = worker.process_chunk(chunk, first_subquery)
 
-            # Extract answer
-            if extraction_func:
-                answer = extraction_func(response["content"])
-            else:
-                answer = response["content"]
+                # Track tokens
+                all_worker_completion_tokens.append(response["usage"].completion_tokens)
+                all_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
 
-            logger.info(f"Worker {i+1}/{len(chunks)} answer: {answer}")
+                # Extract answer
+                if extraction_func:
+                    answer = extraction_func(response["content"])
+                else:
+                    answer = response["content"]
 
-            # Early stopping: if valid answer found, stop
-            if answer and answer.lower() not in ["not found", "", "none"]:
-                intermediate_answer = answer
-                logger.info(f"Found intermediate answer, stopping first hop early")
+                logger.info(f"Worker {i+1}/{len(chunks)} answer: {answer}")
+
+                # Early stopping: if valid answer found, stop
+                if answer and answer.lower() not in ["not found", "", "none"]:
+                    intermediate_answer = answer
+                    logger.info(f"Found intermediate answer, stopping first hop early")
+                    del worker
+                    break
+
                 del worker
-                break
 
-            del worker
+            # If no answer found, increment retry counter
+            if not intermediate_answer:
+                retry_count += 1
 
         if not intermediate_answer:
-            logger.warning("No valid answer found in first hop")
+            logger.warning(f"No valid answer found in first hop after {self.nb_retries} attempts")
             return {
                 'content': "",
                 'token_usage': {
@@ -886,41 +900,52 @@ class BridgeQueryAgents:
         logger.info(f"Second subquery: {second_subquery}")
         del query_updater
 
-        # ========== SECOND HOP: Workers answer second subquery ==========
+        # ========== SECOND HOP: Workers answer second subquery (with retry) ==========
         final_answer = ""
+        retry_count = 0
 
-        for i, chunk in enumerate(chunks):
-            worker = WorkerAgent(
-                self.worker_model,
-                self.worker_prompt,
-                max_tokens=self.max_tokens_worker
-            )
+        while not final_answer and retry_count < self.nb_retries:
+            if retry_count > 0:
+                logger.info(f"Second hop retry {retry_count}/{self.nb_retries - 1} - shuffling chunks")
+                # Shuffle chunks for retry
+                random.shuffle(chunks)
 
-            response = worker.process_chunk(chunk, second_subquery)
+            for i, chunk in enumerate(chunks):
+                worker = WorkerAgent(
+                    self.worker_model,
+                    self.worker_prompt,
+                    max_tokens=self.max_tokens_worker
+                )
 
-            # Track tokens
-            all_worker_completion_tokens.append(response["usage"].completion_tokens)
-            all_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
+                response = worker.process_chunk(chunk, second_subquery)
 
-            # Extract answer
-            if extraction_func:
-                answer = extraction_func(response["content"])
-            else:
-                answer = response["content"]
+                # Track tokens
+                all_worker_completion_tokens.append(response["usage"].completion_tokens)
+                all_worker_prompt_tokens.append(getattr(response["usage"], 'prompt_tokens', 0))
 
-            logger.info(f"Worker {i+1}/{len(chunks)} answer: {answer}")
+                # Extract answer
+                if extraction_func:
+                    answer = extraction_func(response["content"])
+                else:
+                    answer = response["content"]
 
-            # Early stopping: if valid answer found, stop
-            if answer and answer.lower() not in ["not found", "", "none"]:
-                final_answer = answer
-                logger.info(f"Found final answer, stopping second hop early")
+                logger.info(f"Worker {i+1}/{len(chunks)} answer: {answer}")
+
+                # Early stopping: if valid answer found, stop
+                if answer and answer.lower() not in ["not found", "", "none"]:
+                    final_answer = answer
+                    logger.info(f"Found final answer, stopping second hop early")
+                    del worker
+                    break
+
                 del worker
-                break
 
-            del worker
+            # If no answer found, increment retry counter
+            if not final_answer:
+                retry_count += 1
 
         if not final_answer:
-            logger.warning("No valid answer found in second hop")
+            logger.warning(f"No valid answer found in second hop after {self.nb_retries} attempts")
 
         # ========== Calculate token usage statistics ==========
         avg_completion_tokens = sum(all_worker_completion_tokens) / len(all_worker_completion_tokens) if all_worker_completion_tokens else 0

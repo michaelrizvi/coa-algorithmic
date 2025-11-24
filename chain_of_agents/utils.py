@@ -1330,6 +1330,7 @@ def insert_needle_at_depth(
     - Repeats corpus when context_length exceeds corpus size
     - Inserts needle at sentence boundaries for natural blending
     - Needle is split into individual words (not inserted as single element)
+    - PRESERVES paragraph structure (\n\n) to ensure proper chunking
 
     Args:
         haystack: The full corpus text
@@ -1340,8 +1341,19 @@ def insert_needle_at_depth(
     Returns:
         str: Haystack text with needle inserted at the specified depth
     """
-    # Split haystack into words
-    words = haystack.split()
+    # Split haystack into paragraphs to preserve structure
+    paragraphs = haystack.split('\n\n')
+
+    # Convert to words while tracking paragraph boundaries
+    words = []
+    para_boundaries = [0]  # Track where each paragraph starts/ends in the word list
+
+    for para in paragraphs:
+        if para.strip():  # Skip empty paragraphs
+            para_words = para.split()
+            words.extend(para_words)
+            para_boundaries.append(len(words))
+
     original_corpus_size = len(words)
 
     # For context lengths larger than corpus, repeat the corpus
@@ -1349,11 +1361,35 @@ def insert_needle_at_depth(
     if context_length > len(words):
         # Calculate how many times we need to repeat
         repeats_needed = (context_length // len(words)) + 1
-        words = (words * repeats_needed)[:context_length]
+
+        # Repeat both words and paragraph boundaries
+        original_word_count = len(words)
+        repeated_words = []
+        repeated_boundaries = [0]
+
+        for rep in range(repeats_needed):
+            repeated_words.extend(words)
+            # Add boundaries offset by the current position
+            for i in range(1, len(para_boundaries)):
+                boundary = para_boundaries[i] + (rep * original_word_count)
+                repeated_boundaries.append(boundary)
+
+        # Truncate to desired context length
+        words = repeated_words[:context_length]
+
+        # Update boundaries to only include those within the truncated length
+        para_boundaries = [b for b in repeated_boundaries if b <= context_length]
+        if para_boundaries[-1] != context_length:
+            para_boundaries.append(context_length)
+
         logger.info(f"Repeated corpus {repeats_needed} times to reach context_length={context_length} (original corpus: {original_corpus_size} words)")
     elif len(words) > context_length:
         # Truncate to desired context length
         words = words[:context_length]
+        # Update boundaries
+        para_boundaries = [b for b in para_boundaries if b <= context_length]
+        if para_boundaries[-1] != context_length:
+            para_boundaries.append(context_length)
 
     # Calculate target insertion point based on depth
     target_position = int(len(words) * depth)
@@ -1370,8 +1406,23 @@ def insert_needle_at_depth(
     # This ensures needle blends naturally into the text
     words[insertion_point:insertion_point] = needle_words
 
-    # Rejoin into text
-    result = " ".join(words)
+    # Update paragraph boundaries after insertion
+    # All boundaries after the insertion point need to be shifted by needle length
+    for i in range(len(para_boundaries)):
+        if para_boundaries[i] > insertion_point:
+            para_boundaries[i] += len(needle_words)
+
+    # Reconstruct text with paragraph breaks preserved
+    result_paragraphs = []
+    for i in range(len(para_boundaries) - 1):
+        start_idx = para_boundaries[i]
+        end_idx = para_boundaries[i + 1]
+        if start_idx < len(words) and end_idx <= len(words):
+            para_text = ' '.join(words[start_idx:end_idx])
+            if para_text.strip():  # Only add non-empty paragraphs
+                result_paragraphs.append(para_text)
+
+    result = '\n\n'.join(result_paragraphs)
 
     logger.info(f"Inserted {len(needle_words)}-word needle at position {insertion_point}/{len(words)-len(needle_words)} (target depth={depth:.1%}, actual depth={insertion_point/(len(words)-len(needle_words)):.1%})")
 
@@ -1740,46 +1791,78 @@ def normalize_answer(text: str) -> str:
     return text.strip()
 
 
-def check_hotpotqa_exact_match(predicted: str, ground_truth: str) -> bool:
+def hotpotqa_exact_match(predicted: str, ground_truth: str) -> bool:
     """
-    Check exact match between predicted and ground truth answers.
+    Official HotPotQA exact match metric.
 
-    Uses standard HotPotQA normalization before comparison.
-    Follows the official HotPotQA evaluation: checks both exact match and substring match.
+    Checks strict string equality after normalization (lowercase, remove articles,
+    remove punctuation, normalize whitespace). This matches the official evaluation
+    from github.com/hotpotqa/hotpot.
 
     Args:
         predicted: Predicted answer from model
         ground_truth: Ground truth answer
 
     Returns:
-        bool: True if answers match after normalization
+        bool: True if normalized answers are exactly equal
     """
     if not predicted or not ground_truth:
         return False
 
-    # Normalize both answers
-    pred_norm = normalize_answer(predicted)
-    gt_norm = normalize_answer(ground_truth)
+    return normalize_answer(predicted) == normalize_answer(ground_truth)
 
-    # Check exact match first (fastest)
-    if pred_norm == gt_norm:
-        return True
 
-    # Check if ground truth is contained in predicted answer
-    # This handles cases where the model gives verbose answers like:
-    # GT: "Chief of Protocol"
-    # Pred: "served as Chief of Protocol of the United States"
-    if gt_norm in pred_norm:
-        return True
+def hotpotqa_f1_score(predicted: str, ground_truth: str) -> float:
+    """
+    Official HotPotQA F1 score metric.
 
-    # Check if predicted is contained in ground truth
-    # This handles cases where the model gives shorter answers like:
-    # GT: "Greenwich Village, New York City"
-    # Pred: "New York City"
-    if pred_norm in gt_norm:
-        return True
+    Calculates token-level F1 score between predicted and ground truth answers.
+    This metric is more lenient than exact match and handles cases where answers
+    contain the same information in different order or with extra words.
 
-    return False
+    Based on the official implementation from github.com/hotpotqa/hotpot.
+
+    Args:
+        predicted: Predicted answer from model
+        ground_truth: Ground truth answer
+
+    Returns:
+        float: F1 score between 0.0 and 1.0
+    """
+    from collections import Counter
+
+    normalized_prediction = normalize_answer(predicted)
+    normalized_ground_truth = normalize_answer(ground_truth)
+
+    # Handle empty cases
+    if not normalized_prediction or not normalized_ground_truth:
+        return 0.0
+
+    # Special handling for yes/no/noanswer (from official implementation)
+    if normalized_prediction in ['yes', 'no', 'noanswer'] and normalized_prediction != normalized_ground_truth:
+        return 0.0
+    if normalized_ground_truth in ['yes', 'no', 'noanswer'] and normalized_prediction != normalized_ground_truth:
+        return 0.0
+
+    # Tokenize normalized answers
+    prediction_tokens = normalized_prediction.split()
+    ground_truth_tokens = normalized_ground_truth.split()
+
+    # Count common tokens using Counter intersection
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+
+    if num_same == 0:
+        return 0.0
+
+    # Calculate precision and recall
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+
+    # Calculate F1 as harmonic mean
+    f1 = (2 * precision * recall) / (precision + recall)
+
+    return f1
 
 
 def get_bridge_query_prompts() -> Tuple[str, str, str]:
