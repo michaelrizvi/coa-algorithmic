@@ -82,26 +82,54 @@ class ManagerAgent:
         self.max_new_tokens = max_tokens  # Adjust as needed for synthesis
         self.temperature = temperature  # Adjust for creativity vs. accuracy
     
+    def process_query(self, query: str) -> Dict:
+        """
+        Process a query directly without worker outputs.
+
+        This method is used for tasks like query decomposition where there are no
+        worker outputs to synthesize, only a query to process.
+
+        Args:
+            query: The query or input text to process
+
+        Returns:
+            Dict: Response containing 'content' and 'usage' keys
+        """
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": query}
+        ]
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            max_new_tokens=self.max_new_tokens
+        )
+        content = response.choices[0].message.content
+        usage = response.usage if hasattr(response, "usage") else {}
+        return {"content": content, "usage": usage}
+
     def synthesize(self, worker_outputs: List[str], query: str) -> str:
         """
         Synthesize outputs from multiple worker agents.
-        
+
         Args:
             worker_outputs: List of outputs from worker agents
             query: The original user query
-            
+
         Returns:
             str: The final synthesized response
         """
-        combined_outputs = "\n\n".join(f"Worker {i+1}: {output}" 
+        combined_outputs = "\n\n".join(f"Worker {i+1}: {output}"
                                      for i, output in enumerate(worker_outputs))
-        
+
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Worker Outputs:\n{combined_outputs}\n\nQuery: {query}"}
         ]
 
-        print("Synthesizing with messages:", messages)  # Debug log 
+        print("Synthesizing with messages:", messages)  # Debug log
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,

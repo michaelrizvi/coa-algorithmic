@@ -681,7 +681,7 @@ class BridgeQueryAgents:
         worker_prompt: Optional[str] = None,
         query_splitter_prompt: Optional[str] = None,
         query_updater_prompt: Optional[str] = None,
-        nb_retries: int = 3
+        nb_retries: int = 5
     ):
         """
         Initialize BridgeQueryAgents.
@@ -790,7 +790,7 @@ class BridgeQueryAgents:
             max_tokens=self.max_tokens_manager
         )
 
-        splitter_response = query_splitter.synthesize([query], "Decompose the query")
+        splitter_response = query_splitter.process_query(query)
         first_subquery = self._extract_first_subquery(splitter_response["content"])
 
         # Track manager tokens
@@ -878,7 +878,7 @@ class BridgeQueryAgents:
         )
 
         updater_input = f"Original query: {query}\nIntermediate answer: {intermediate_answer}"
-        updater_response = query_updater.synthesize([updater_input], "Generate second subquery")
+        updater_response = query_updater.process_query(updater_input)
         second_subquery = self._extract_second_subquery(updater_response["content"])
 
         # Track manager tokens
